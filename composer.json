@@ -1,0 +1,16 @@
+{
+  "name": "ocallit/sqler",
+  "description": "A php sql builder, helpers and mysqli wrapper",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "ext-mysqli": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Ocallit\\Sqler\\": "src/"
+    }
+  },
+  "version": "1.0.0"
+}
