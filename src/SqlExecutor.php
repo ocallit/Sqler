@@ -22,7 +22,10 @@ use function mysqli_connect_errno;
 use function str_replace;
 use function usleep;
 
-class Sql {
+/**
+ * //@TODO Sql methods pa: multikyey last is array
+ */
+class SqlExecutor {
     protected mysqli|null $mysqli;
     protected string $charset = 'utf8mb4';
     protected string $coalition = 'utf8mb4_0900_ai_ci';
@@ -109,15 +112,15 @@ class Sql {
      * 
      */
     protected array $retryOnErrors = [
-      Sql::ERROR_CANT_LOCK => 1,
-      Sql::ERROR_LOCK_ABORTED => 1,
-      Sql::ERROR_LOCK_WAIT_TIMEOUT => 1,
-      Sql::ERROR_LOCK_TABLE_FULL => 1,
-      Sql::ERROR_LOCK_DEADLOCK => 1,
-      Sql::ERROR_TRANSACTION_ROLLBACK => 1,
-      Sql::ERROR_XA_DEADLOCK => 1,
-      Sql::ERROR_SERVER_GONE => 1,
-      Sql::ERROR_SERVER_LOST => 1
+      SqlExecutor::ERROR_CANT_LOCK => 1,
+      SqlExecutor::ERROR_LOCK_ABORTED => 1,
+      SqlExecutor::ERROR_LOCK_WAIT_TIMEOUT => 1,
+      SqlExecutor::ERROR_LOCK_TABLE_FULL => 1,
+      SqlExecutor::ERROR_LOCK_DEADLOCK => 1,
+      SqlExecutor::ERROR_TRANSACTION_ROLLBACK => 1,
+      SqlExecutor::ERROR_XA_DEADLOCK => 1,
+      SqlExecutor::ERROR_SERVER_GONE => 1,
+      SqlExecutor::ERROR_SERVER_LOST => 1
     ];
     
     /**
@@ -145,8 +148,8 @@ class Sql {
      * @var array $reconnectOnErrors mysql error codes on which to reconnect
      */
     protected array $reconnectOnErrors = [
-      Sql::ERROR_SERVER_GONE => 1,
-      Sql::ERROR_SERVER_LOST => 1
+      SqlExecutor::ERROR_SERVER_GONE => 1,
+      SqlExecutor::ERROR_SERVER_LOST => 1
     ];
 
     public string $lastPreparedQuery = "";
@@ -181,7 +184,7 @@ class Sql {
     protected function connect():void {
         $this->mysqli = new mysqli();
         foreach($this->connect_options as $option => $value)
-            if (!$this->mysqli->options($option, $value)) {
+            if(!$this->mysqli->options($option, $value)) {
                 throw new mysqli_sql_exception("Setting $option $value failed");
             }
         $attempts = 0;
@@ -203,11 +206,11 @@ class Sql {
      *
      *
      * @param string|mysqli_stmt $query
-     * @param array|null $parameters
+     * @param array $parameters
      * @return bool|mysqli_result
      * @throws Exception
      */
-    public function query($query, $parameters = []):bool|mysqli_result {
+    public function query(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
         return $this->runSql($query, $parameters);
     }
 
@@ -225,12 +228,12 @@ class Sql {
      * return value of first column in first row $default on not found
      *
      * @param string|mysqli_stmt $query
-     * @param array|null $parameters
+     * @param array $parameters
      * @param string|null|bool $default
      * @return string|null|bool
      * @throws Exception
      */
-    public function firstValue($query, $parameters = [], string|null|bool $default = ""):string|null|bool {
+    public function firstValue(string|mysqli_stmt $query, array $parameters = [], string|null|bool $default = ""):string|null|bool {
         if(empty($query))
             return $default;
         try {
@@ -244,13 +247,13 @@ class Sql {
      * return [col1=>value1, ...] $default on not found
      *
      * @param string|mysqli_stmt $query
-     * @param array|null $parameters
+     * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function row($query, $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC):array {
+    public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -265,13 +268,13 @@ class Sql {
      *
      * @param string|mysqli_stmt $query
      * @param string $key
-     * @param array|null $parameters
+     * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function arrayKeyed($query, $key, $parameters = [], $default =[], $resultType = MYSQLI_ASSOC):array {
+    public function arrayKeyed($query, $key, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -286,13 +289,13 @@ class Sql {
      * return [[col1=>value1],[]], $default on not found
      *
      * @param string|mysqli_stmt $query
-     * @param array|null $parameters
+     * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function array($query, $parameters = [], $default =[], $resultType = MYSQLI_ASSOC):array {
+    public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -311,7 +314,7 @@ class Sql {
      * @return array
      * @throws Exception
      */
-    public function multiKey($query, $keys, $parameters = [], $default = []):array {
+    public function multiKey($query, $keys, $parameters = [], array $default = []): array {
         if(empty($query))
             return $default;
         try {
@@ -338,18 +341,18 @@ class Sql {
      * @return array
      * @throws Exception
      */
-    public function multiKeyN($query, int $numFields, $parameters = [], $default = []): array {
-        if (empty($query)) {
+    public function multiKeyN($query, int $numFields, $parameters = [], array $default = []): array {
+        if(empty($query))
             return $default;
-        }
         try {
             $result = $this->runSql($query, $parameters);
-            for ($ret = []; $tmp = $result->fetch_array(MYSQLI_ASSOC);) {
+            for($ret = []; $tmp = $result->fetch_array(MYSQLI_ASSOC);) {
                 $r = &$ret;
-                $keys = array_slice(array_keys($tmp), 0, $numFields);
-                foreach ($keys as $v) {
+                if(!isset($keys))
+                    $keys = array_slice(array_keys($tmp), 0, $numFields);
+                foreach($keys as $v) {
                     $key = $tmp[$v] ?? $v;
-                    if (!array_key_exists($key, $r)) {
+                    if(!array_key_exists($key, $r)) {
                         $r[$key] = [];
                     }
                     $r = &$r[$key];
@@ -362,32 +365,56 @@ class Sql {
         }
     }
 
+    public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
+       if(empty($query))
+           return $default;
+        try {
+            $result = $this->runSql($query, $parameters);
+            $numFields = $result->field_count;
+            $keyedFields = $numFields - 1;
+            for($ret = []; $tmp = $result->fetch_array(MYSQLI_NUM);) {
+                $r = &$ret;
+                for($iField = 0; $iField < $keyedFields; ++$iField) {
+                    $key = $tmp[$iField];
+                    if(!array_key_exists($key, $ret))
+                        $r[$key] = [];
+                    $r = &$r[$key];
+                }
+                $r[] = $tmp[$keyedFields];
+            }
+            return empty($ret) ? $default : $ret;
+        } finally {
+            $this->freeResult($result ?? false);
+        }
+    }
+
+
     /**
-     * @param $query
-     * @param $parameters
-     * @param $default
+     * @param string|mysqli_stmt $query
+     * @param array $parameters
+     * @param array $default
      * @return array
      * @throws Exception
      */
-    public function keyValue($query, $parameters = [], $default =[]):array {
+    public function keyValue(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         if(empty($query))
             return $default;
         try {
             $result = $this->runSql($query, $parameters);
             for($ret = []; $tmp = $result->fetch_array(MYSQLI_NUM);)
-                $ret[$tmp[0]] = $tmp[1] ?? $tmp[0];
+                $ret[$tmp[0]] = $tmp[1] ?? null;
             return empty($ret) ? $default : $ret;
         } finally { $this->freeResult($result ?? false); }
     }
 
     /**
-     * @param $query
-     * @param $parameters
-     * @param $default
+     * @param string|mysqli_stmt  $query
+     * @param array $parameters
+     * @param array $default
      * @return array
      * @throws Exception
      */
-    public function vector($query, $parameters = [], $default =[]):array {
+    public function vector(string|mysqli_stmt $query, array $parameters = [], $default =[]): array {
         if(empty($query))
             return $default;
         try {
@@ -399,12 +426,26 @@ class Sql {
     }
 
     /**
+     * Returns mysqli_result without freeing it. Caller is responsible for cleanup.
+     *
+     * @param string|mysqli_stmt $query
+     * @param array $parameters
+     * @return mysqli_result|bool
+     * @throws Exception
+     */
+    public function result(string|mysqli_stmt $query, array $parameters = []): mysqli_result|bool {
+        if(empty($query))
+            return $this->runSql("SELECT /*" . __METHOD__ . "*/ NULL FROM DUAL LIMIT 0");
+        return $this->runSql($query, $parameters);
+    }
+
+    /**
      * @param array $queries
      * @param string|int $comment
      * @return void
      * @throws Exception
      */
-    public function transaction(array $queries, $comment = ''):void {
+    public function transaction(array $queries, string|int $comment = ''):void {
         $attempts = 0;
         while(++$attempts <= $this->retries) {
             try {
@@ -424,7 +465,7 @@ class Sql {
     public function begin($comment = ''): bool {
         try {
             $result = $this->runSql("START TRANSACTION /*$comment*/");
-            if ($result !== false) {
+            if($result !== false) {
                 $this->openTransactions++;
                 return true;
             }
@@ -439,7 +480,7 @@ class Sql {
     public function commit($comment = ''): bool {
         try {
             $result = $this->runSql("COMMIT /*$comment*/");
-            if ($result !== false && $this->openTransactions > 0) {
+            if($result !== false && $this->openTransactions > 0) {
                 $this->openTransactions--;
                 return true;
             }
@@ -454,7 +495,7 @@ class Sql {
     public function rollback($comment = ''): bool {
         try {
             $result = $this->runSql("ROLLBACK /*$comment*/");
-            if ($result !== false && $this->openTransactions > 0) {
+            if($result !== false && $this->openTransactions > 0) {
                 $this->openTransactions--;
                 return true;
             }
@@ -469,12 +510,12 @@ class Sql {
      * @return bool True if the last error was a table not found error
      */
     public function is_last_error_table_not_found(): bool {
-        if (!$this->mysqli) return false;
+        if(!$this->mysqli) return false;
 
         return in_array($this->mysqli->errno, [
-          Sql::ERROR_TABLE_NOT_FOUND,
-          Sql::ERROR_NO_SUCH_TABLE,
-          Sql::ERROR_UNKNOWN_TABLE
+          SqlExecutor::ERROR_TABLE_NOT_FOUND,
+          SqlExecutor::ERROR_NO_SUCH_TABLE,
+          SqlExecutor::ERROR_UNKNOWN_TABLE
         ], true);
     }
 
@@ -485,11 +526,11 @@ class Sql {
      * @return bool True if the last error was a duplicate key error
      */
     public function is_last_error_duplicate_key(): bool {
-        if (!$this->mysqli) return false;
+        if(!$this->mysqli) return false;
 
         return in_array($this->mysqli->errno, [
-          Sql::ERROR_UNIQUE_VIOLATION,
-          Sql::ERROR_PRIMARY_KEY_VIOLATION
+          SqlExecutor::ERROR_UNIQUE_VIOLATION,
+          SqlExecutor::ERROR_PRIMARY_KEY_VIOLATION
         ], true);
     }
 
@@ -500,11 +541,11 @@ class Sql {
      * @return bool True if the last error was a foreign key violation
      */
     public function is_last_error_invalid_foreign_key(): bool {
-        if (!$this->mysqli) return false;
+        if(!$this->mysqli) return false;
 
         return in_array($this->mysqli->errno, [
-          Sql::ERROR_FOREIGN_KEY_VIOLATION,
-          Sql::ERROR_FOREIGN_KEY_PARENT_NOT_FOUND
+          SqlExecutor::ERROR_FOREIGN_KEY_VIOLATION,
+          SqlExecutor::ERROR_FOREIGN_KEY_PARENT_NOT_FOUND
         ], true);
     }
 
@@ -515,9 +556,9 @@ class Sql {
      * @return bool True if the last error was due to existing child records
      */
     public function is_last_error_child_records_exist(): bool {
-        if (!$this->mysqli) return false;
+        if(!$this->mysqli) return false;
 
-        return $this->mysqli->errno === Sql::ERROR_FOREIGN_KEY_CHILD_EXISTS;
+        return $this->mysqli->errno === SqlExecutor::ERROR_FOREIGN_KEY_CHILD_EXISTS;
     }
     
     /**
@@ -527,26 +568,26 @@ class Sql {
      * @return bool True if the last error was a column not found error
      */
     public function is_last_error_column_not_found(): bool {
-        if (!$this->mysqli) return false;
+        if(!$this->mysqli) return false;
 
         return in_array($this->mysqli->errno, [
-          Sql::ERROR_UNKNOWN_COLUMN,
-          Sql::ERROR_BAD_FIELD,
-          Sql::ERROR_WRONG_FIELD_SPEC
+          SqlExecutor::ERROR_UNKNOWN_COLUMN,
+          SqlExecutor::ERROR_BAD_FIELD,
+          SqlExecutor::ERROR_WRONG_FIELD_SPEC
         ], true);
     }
 
-    public function getLog():array {return $this->log;}
+    public function getLog(): array {return $this->log;}
 
-    public function getErrorLog():array {return $this->logError;}
+    public function getErrorLog(): array {return $this->logError;}
 
     /**
      * Closes the current connection
      */
     public function closeConnection(): void {
-        if ($this->mysqli instanceof mysqli) {
+        if($this->mysqli instanceof mysqli) {
             try {
-                if ($this->openTransactions > 0) {
+                if($this->openTransactions > 0) {
                     try {
                         $this->logErrorAdd(
                           0,
@@ -583,11 +624,11 @@ class Sql {
 
     /**
      * @param  string|mysqli_stmt $query
-     * @param array|null $parameters
+     * @param array $parameters
      * @return bool|mysqli_result
      * @throws Exception
      */
-    protected function runSql($query, $parameters = []):bool|mysqli_result {
+    protected function runSql(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
         if(empty($this->mysqli))
             $this->connect();
         $this->logAdd($query, $parameters);
