@@ -65,7 +65,7 @@ class DatabaseMetadata {
         if(empty($tableName))
             return [];
         if(!isset($this->tableColumns[$tableName]))
-            $this->tableColumns[$tableName] = $this->sqlExecutor->array("SHOW /" . __METHOD__ . "/ FULL COLUMNS FROM " . self::fieldIt($tableName), 'Field');
+            $this->tableColumns[$tableName] = $this->sqlExecutor->array("SHOW /" . __METHOD__ . "/ FULL COLUMNS FROM " . SqlUtils::fieldIt($tableName), 'Field');
         return $this->tableColumns[$tableName];
     }
 
@@ -102,20 +102,6 @@ class DatabaseMetadata {
         $this->tableColumns = [];
     }
 
-    /**
-     * Protect with ` backticks a: column name to column name respecting . table.column to table.column
-     *
-     * @param string $fieldName
-     * @return string The protected field name (e.g., '`table`.`column`').
-     */
-    protected function fieldIt(string $fieldName): string {
-        $protected = [];
-        $n = explode('.',$fieldName);
-        foreach($n as $field) {
-            $protected[]= '`'.str_replace('`', '', $field ).'`';
-        }
-        return implode('.', $protected);
-    }
 
     protected function getType($field): string {
         $types = [

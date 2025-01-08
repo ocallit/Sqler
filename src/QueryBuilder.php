@@ -1,16 +1,12 @@
 <?php
-/** @noinspection PhpMissingParamTypeInspection */
 /** @noinspection PhpUnused */
 
-namespace ocallit\sqler;
+namespace Ocallit\Sqler;
 
 use function array_key_exists;
-use function explode;
 use function implode;
 use function is_array;
-use function str_replace;
-use function trim;
-use function chr;
+
 
 class QueryBuilder {
     public bool $useNewOnDuplicate = true; // Beginning with MySQL 8.0.19,
@@ -35,38 +31,6 @@ class QueryBuilder {
         $this->useNewOnDuplicate = $useNewOnDuplicate;
     }
 
-    public function strIt($str):string|array {
-        if($str === null) {
-            return 'NULL';
-        }
-        if(is_array($str)) {
-            foreach($str as &$d)
-                $d = $this->strIt($d);
-            return $str;
-        }
-        return "'".str_replace( array("\\",chr(8),chr(0),chr(26),chr(27)), array("\\\\",'','','',''),str_replace("'","''", "$str"))."'";
-    }
-
-    public function fieldIt($fieldName):string|array {
-        if($fieldName[0] === '(')
-            return $fieldName;
-        if(is_array($fieldName)) {
-            foreach($fieldName as &$d)
-                $d = $this->fieldIt($d);
-            return $fieldName;
-        }
-        $protected = [];
-        $n = explode('.',$fieldName);
-        foreach($n as $field) {
-            $protected[]= '`'.
-                str_replace(['`',"\r","\n","\t","\0", "\\",
-                    chr(8),chr(0),chr(26),chr(27)],
-        '',
-        trim($field) ).'`';
-        }
-        return implode('.', $protected);
-    }
-
     public function insert($table, $array,
            $onDuplicateKeyUpdate = false, $onDuplicateKeyDontUpdate = [], $onDuplicateKeyOverride = [],
            $comment = ''
@@ -76,7 +40,7 @@ class QueryBuilder {
         $parameters = [];
         $onDuplicateKey = [];
         foreach($array as $columnName => $value) {
-            $col = $this->fieldIt($columnName);
+            $col = SqlUtils::fieldIt($columnName);
             $columns[] = $col;
             if(array_key_exists($value, $this->dontQuoteValue)) {
                 $values[] = $value;
@@ -93,11 +57,11 @@ class QueryBuilder {
                     $onDuplicateKey[] = "$col=VALUES($col)";
             }
         }
-        if(empty($comment))
-            $comment = __METHOD__;
+        if(!empty($comment))
+            $comment = "/*" . __METHOD__ - "*/";
 
-        $insert = "INSERT /*$comment*/ " .
-            " INTO " . $this->fieldIt($table) . "(" . implode(",", $columns) . ") " .
+        $insert = "INSERT $comment " .
+            " INTO " . SqlUtils::fieldIt($table) . "(" . implode(",", $columns) . ") " .
             " VALUES(" . implode(",", $values) . ")";
         if(!empty($onDuplicateKey)) {
             $insert .= "  as new ON DUPLICATE KEY UPDATE " . implode(",", $onDuplicateKey);
@@ -109,7 +73,7 @@ class QueryBuilder {
         $set = [];
         $parameters = [];
         foreach($array as $columnName => $value) {
-            $col = $this->fieldIt($columnName);
+            $col = SqlUtils::fieldIt($columnName);
             if(array_key_exists($value, $this->dontQuoteValue)) {
                 $set[] = "$col=$value";
             } else {
@@ -117,10 +81,11 @@ class QueryBuilder {
                 $parameters[] = $value;
             }
         }
-        if(empty($comment))
-            $comment = __METHOD__;
+        if(!empty($comment))
+            $comment = "/*" . __METHOD__ - "*/";
+
         $whereArray = $this->where($where);
-        $update = "UPDATE /*$comment*/ " . $this->fieldIt($table) . " SET " . implode(",", $set) .
+        $update = "UPDATE $comment " . SqlUtils::fieldIt($table) . " SET " . implode(",", $set) .
           " WHERE $whereArray[query]";
         return ["query" => $update, "parameters" => array_merge($parameters, $whereArray['parameters']) ];
     }
@@ -133,7 +98,7 @@ class QueryBuilder {
         $clause = [];
         $parameters = [];
         foreach($array as $columnName => $value) {
-            $col = $this->fieldIt($columnName);
+            $col = SqlUtils::fieldIt($columnName);
             if(array_key_exists($value, $this->dontQuoteValue)) {
                 $clause[] = "$col=$value";
             } elseif(is_array($value)) {

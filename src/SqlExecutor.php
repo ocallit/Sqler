@@ -1,8 +1,7 @@
 <?php
-/** @noinspection PhpMissingParamTypeInspection */
 /** @noinspection PhpUnused */
 
-namespace ocallit\sqler;
+namespace Ocallit\Sqler;
 
 use Exception;
 use mysqli;
@@ -12,19 +11,15 @@ use mysqli_stmt;
 use Throwable;
 use function array_key_exists;
 use function array_merge;
-use function chr;
 use function implode;
 use function in_array;
 use function is_array;
 use function is_string;
 use function mysqli_connect_error;
 use function mysqli_connect_errno;
-use function str_replace;
 use function usleep;
 
-/**
- * //@TODO Sql methods pa: multikyey last is array
- */
+
 class SqlExecutor {
     protected mysqli|null $mysqli;
     protected string $charset = 'utf8mb4';
@@ -159,7 +154,6 @@ class SqlExecutor {
 
     protected int $openTransactions = 0;
 
-
     /**
      *
      *
@@ -169,7 +163,7 @@ class SqlExecutor {
      * @param string $coalition default utf8mb4_0900_ai_ci
      * @param int $flags
      */
-    public function __construct(array $connect, array $connect_options = [], $charset = 'utf8', $coalition = 'utf8_unicode_ci', int $flags = 0) {
+    public function __construct(array $connect, array $connect_options = [], string $charset = 'utf8', string $coalition = 'utf8_unicode_ci', int $flags = 0) {
         $this->connect = array_merge($this->connect, $connect) ;
         $this->connect_options = array_merge($this->connect_options, $connect_options);
         $this->charset = $charset;
@@ -193,9 +187,9 @@ class SqlExecutor {
               $this->connect['password'], $this->connect['database'], $this->connect['port'],
               $this->connect['socket'], $this->connect['flags'])) {
                 $this->mysqli->set_charset($this->charset);
-                $charset = $this->strIt($this->charset);
-                $coalition = $this->strIt($this->coalition);
-                $this->query( "SET NAMES $charset COLLATE $coalition");
+                // $charset = SqlUtils::strIt($this->charset);
+                // $coalition = SqlUtils::strIt($this->coalition);
+                $this->query( "SET NAMES ? COLLATE ?", [$this->charset, $this->coalition]);
                 return;
             }
         }
@@ -253,7 +247,7 @@ class SqlExecutor {
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
+    public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -274,7 +268,7 @@ class SqlExecutor {
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function arrayKeyed($query, $key, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
+    public function arrayKeyed(string|mysqli_stmt $query, string $key, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -286,7 +280,7 @@ class SqlExecutor {
     }
 
     /**
-     * return [[col1=>value1],[]], $default on not found
+     * return [[colName1=>value1, colName2=>value2, ...],[]], $default on not found
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
@@ -295,7 +289,7 @@ class SqlExecutor {
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws Exception
      */
-    public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], $resultType = MYSQLI_ASSOC): array {
+    public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
             return $default;
         try {
@@ -314,7 +308,7 @@ class SqlExecutor {
      * @return array
      * @throws Exception
      */
-    public function multiKey($query, $keys, $parameters = [], array $default = []): array {
+    public function multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array {
         if(empty($query))
             return $default;
         try {
@@ -341,7 +335,7 @@ class SqlExecutor {
      * @return array
      * @throws Exception
      */
-    public function multiKeyN($query, int $numFields, $parameters = [], array $default = []): array {
+    public function multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array {
         if(empty($query))
             return $default;
         try {
@@ -365,6 +359,13 @@ class SqlExecutor {
         }
     }
 
+    /**
+     * @param string|mysqli_stmt $query
+     * @param array $parameters
+     * @param array $default
+     * @return array
+     * @throws Exception
+     */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
        if(empty($query))
            return $default;
@@ -388,8 +389,9 @@ class SqlExecutor {
         }
     }
 
-
     /**
+     * return [[row1.col1 => row1.col2], [row2.col1 => row2.col2], ...] a key => value array, $default on not found
+     *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param array $default
@@ -408,13 +410,15 @@ class SqlExecutor {
     }
 
     /**
+     * return [row1.col1, row2.col1, ...], $default on not found
+     *
      * @param string|mysqli_stmt  $query
      * @param array $parameters
      * @param array $default
      * @return array
      * @throws Exception
      */
-    public function vector(string|mysqli_stmt $query, array $parameters = [], $default =[]): array {
+    public function vector(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         if(empty($query))
             return $default;
         try {
@@ -474,7 +478,8 @@ class SqlExecutor {
     }
 
     /**
-     * Commit current transaction
+     * Commit current transaction.
+     *
      * @throws mysqli_sql_exception
      */
     public function commit($comment = ''): bool {
@@ -489,7 +494,8 @@ class SqlExecutor {
     }
 
     /**
-     * Rollback current transaction
+     * Rollback current transaction.
+     *
      * @throws mysqli_sql_exception
      */
     public function rollback($comment = ''): bool {
@@ -687,15 +693,10 @@ class SqlExecutor {
         $this->log[] = $logEntry;
     }
 
-    protected function logErrorAdd(int $errorNumber, string $errorMessage, string $query, array $parameters, $attempt):void {
+    protected function logErrorAdd(int $errorNumber, string $errorMessage, string|mysqli_stmt $query, array $parameters, $attempt):void {
         if(count($this->logError) > $this->maxLogEntries)
             return;
         $this->logError[] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt];
-    }
-
-    protected function strIt($str):string {
-        return empty($str) ? "''" :
-          "'".str_replace( array("\\",chr(8),chr(0),chr(26),chr(27)), array("\\\\",'','','',''),str_replace("'","''", "$str"))."'";
     }
 
 }
