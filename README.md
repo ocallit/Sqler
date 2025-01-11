@@ -1,3 +1,3 @@
 # Sqler
-## WIP
-A php sql builder, helpers and mysqli wrapper
+
+A php sql builder, database & query metadata, helpers and mysqli wrapper
