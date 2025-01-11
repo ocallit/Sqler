@@ -11,6 +11,5 @@
     "psr-4": {
       "Ocallit\\Sqler\\": "src/"
     }
-  },
-  "version": "1.0.1"
+  }
 }
