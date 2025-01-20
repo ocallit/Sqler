@@ -8,6 +8,11 @@ use function str_replace;
 use function chr;
 
 class SqlUtils {
+    const JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE |JSON_INVALID_UTF8_IGNORE |JSON_INVALID_UTF8_SUBSTITUTE;
+
+    public static function toLabel(string $fieldName):string {
+        return ucwords(strtolower( str_replace('_', ' ', $fieldName)));
+    }
 
     /**
      * Protect with ` backticks a: column name to column name respecting . table.column to table.column
