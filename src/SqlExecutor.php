@@ -509,6 +509,13 @@ class SqlExecutor {
         } finally { $this->freeResult($result ?? false); }
     }
 
+    public function getLastErrorNumber(): int {
+        try {
+            if(!$this->mysqli) return 0;
+            return $this->mysqli->errno ?? 0;
+        } catch(Exception $e) {return 0;}
+    }
+
     /**
      * Checks if the last error was a "table not found" error
      * This includes ERROR_TABLE_NOT_FOUND, ERROR_NO_SUCH_TABLE, and ERROR_UNKNOWN_TABLE
