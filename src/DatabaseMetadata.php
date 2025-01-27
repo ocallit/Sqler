@@ -1,14 +1,12 @@
 <?php
-/** @noinspection PhpRedundantOptionalArgumentInspection */
 /** @noinspection PhpUnused */
 
 namespace Ocallit\Sqler;
 
 use Exception;
 use RuntimeException;
-
 /**
- * DatabaseMetadata 0.0.0 WIP
+ * DatabaseMetadata 0.0.1 WIP
  * @TODO UniqueKeys: per table, per table.field, fields are unique tmemself, FK, FK from standard field names, de ida y vuelta
  *
  */
@@ -35,7 +33,7 @@ class DatabaseMetadata {
 
     public function primaryKeys(): array {
         if(empty($this->primaryKeys)) {
-            $sql = "SELECT /" . __METHOD__ . "/ t.TABLE_NAME, c.COLUMN_NAME
+            $sql = "SELECT /*" . __METHOD__ . "*/ t.TABLE_NAME, c.COLUMN_NAME
                 FROM information_schema.TABLES t
                     JOIN information_schema.KEY_COLUMN_USAGE c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
                 WHERE t.TABLE_SCHEMA = DATABASE() AND c.CONSTRAINT_NAME = 'PRIMARY'";
@@ -65,7 +63,8 @@ class DatabaseMetadata {
         if(empty($tableName))
             return [];
         if(!isset($this->tableColumns[$tableName]))
-            $this->tableColumns[$tableName] = $this->sqlExecutor->array("SHOW /" . __METHOD__ . "/ FULL COLUMNS FROM " . SqlUtils::fieldIt($tableName), 'Field');
+            $this->tableColumns[$tableName] = $this->sqlExecutor->array(
+              "SHOW /*" . __METHOD__ . "*/ FULL COLUMNS FROM " . SqlUtils::fieldIt($tableName));
         return $this->tableColumns[$tableName];
     }
 
@@ -74,26 +73,46 @@ class DatabaseMetadata {
      * @param array $parameters
      * @return array
      * @throws Exception
-     *  table: empty is a function call not updatable
      */
     public function query(string $query, array $parameters = []): array {
         $mysqliResult = $this->sqlExecutor->result($query, $parameters);
-        if(!$mysqliResult)
+        if(!$mysqliResult) {
             throw new Exception("Failed to get result metadata");
+        }
 
         $metadata = [];
         $fields = mysqli_fetch_fields($mysqliResult);
+
         foreach($fields as $field) {
-            $tableColumns = self::table($field->orgtable);
-            $metadata[$field->name] = [
-              ...(array)$field,
-              ...$tableColumns[$field->orgname] ?? [],
-              ...[
+
+            $tableColumns = !empty($field->orgtable) ? $this->table($field->orgtable) : [];
+            $tableColumns = array_combine(array_column($tableColumns, 'Field'), $tableColumns);
+
+            $kind = 'derived';
+            if(!empty($field->orgtable)) {
+                if(isset($tableColumns[$field->orgname])) {
+                    $kind = 'table'; // Field exists in the original table
+                }
+            } elseif($field->flags & MYSQLI_GROUP_FLAG) {
+                $kind = 'aggregate';
+            } elseif(empty($field->table)) {
+                if(strpos(strtoupper($field->name), 'CALCULATED_') === 0) {
+                    $kind = 'calculated'; // parece bug aqui
+                }
+            }
+
+            // Build field metadata with correct precedence using array_merge
+            $metadata[$field->name] = array_merge(
+              $tableColumns[$field->orgname] ?? [],
+              (array)$field,
+              [
+                'kind' => $kind,
                 'index' => empty($field->table) ? $field->name : $field->table . '.' . $field->orgname,
-                'Type' => self::getType($field),
-              ],
-            ];
+                'Type' => isset($tableColumns[$field->orgname]) ? $tableColumns[$field->orgname]['Type'] : $this->getType($field)
+              ]
+            );
         }
+
         return $metadata;
     }
 
@@ -115,7 +134,7 @@ class DatabaseMetadata {
         }
 
         if (!isset($this->foreignKeys[$tableName])) {
-            $sql = "SELECT /" . __METHOD__ . "/ 
+            $sql = "SELECT /*" . __METHOD__ . "*/ 
                     kcu.COLUMN_NAME,
                     kcu.REFERENCED_TABLE_NAME,
                     kcu.REFERENCED_COLUMN_NAME
@@ -139,32 +158,32 @@ class DatabaseMetadata {
 
     protected function getType($field): string {
         $types = [
-            MYSQLI_TYPE_TINY => 'tinyint',
-            MYSQLI_TYPE_SHORT => 'smallint',
-            MYSQLI_TYPE_LONG => 'int',
-            MYSQLI_TYPE_FLOAT => 'float',
-            MYSQLI_TYPE_DOUBLE => 'double',
-            MYSQLI_TYPE_TIMESTAMP => 'timestamp',
-            MYSQLI_TYPE_LONGLONG => 'bigint',
-            MYSQLI_TYPE_INT24 => 'mediumint',
-            MYSQLI_TYPE_DATE => 'date',
-            MYSQLI_TYPE_TIME => 'time',
-            MYSQLI_TYPE_DATETIME => 'datetime',
-            MYSQLI_TYPE_YEAR => 'year',
-            MYSQLI_TYPE_NEWDATE => 'date',
-            MYSQLI_TYPE_ENUM => 'enum',
-            MYSQLI_TYPE_SET => 'set',
-            MYSQLI_TYPE_TINY_BLOB => 'tinyblob',
-            MYSQLI_TYPE_MEDIUM_BLOB => 'mediumblob',
-            MYSQLI_TYPE_LONG_BLOB => 'longblob',
-            MYSQLI_TYPE_BLOB => 'blob',
-            MYSQLI_TYPE_VAR_STRING => 'varchar',
-            MYSQLI_TYPE_STRING => 'char',
-            MYSQLI_TYPE_DECIMAL => 'decimal',
-            MYSQLI_TYPE_NEWDECIMAL => 'decimal',
-            MYSQLI_TYPE_JSON => 'json',
-            MYSQLI_TYPE_GEOMETRY => 'geometry',
-            MYSQLI_TYPE_BIT => 'bit',
+          MYSQLI_TYPE_TINY => 'tinyint',
+          MYSQLI_TYPE_SHORT => 'smallint',
+          MYSQLI_TYPE_LONG => 'int',
+          MYSQLI_TYPE_FLOAT => 'float',
+          MYSQLI_TYPE_DOUBLE => 'double',
+          MYSQLI_TYPE_TIMESTAMP => 'timestamp',
+          MYSQLI_TYPE_LONGLONG => 'bigint',
+          MYSQLI_TYPE_INT24 => 'mediumint',
+          MYSQLI_TYPE_DATE => 'date',
+          MYSQLI_TYPE_TIME => 'time',
+          MYSQLI_TYPE_DATETIME => 'datetime',
+          MYSQLI_TYPE_YEAR => 'year',
+          MYSQLI_TYPE_NEWDATE => 'date',
+          MYSQLI_TYPE_ENUM => 'enum',
+          MYSQLI_TYPE_SET => 'set',
+          MYSQLI_TYPE_TINY_BLOB => 'tinyblob',
+          MYSQLI_TYPE_MEDIUM_BLOB => 'mediumblob',
+          MYSQLI_TYPE_LONG_BLOB => 'longblob',
+          MYSQLI_TYPE_BLOB => 'blob',
+          MYSQLI_TYPE_VAR_STRING => 'varchar',
+          MYSQLI_TYPE_STRING => 'char',
+          MYSQLI_TYPE_DECIMAL => 'decimal',
+          MYSQLI_TYPE_NEWDECIMAL => 'decimal',
+          MYSQLI_TYPE_JSON => 'json',
+          MYSQLI_TYPE_GEOMETRY => 'geometry',
+          MYSQLI_TYPE_BIT => 'bit',
         ];
 
         $baseType = $types[$field->type] ?? 'unknown';
