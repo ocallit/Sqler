@@ -8,6 +8,7 @@ use mysqli;
 use mysqli_result;
 use mysqli_sql_exception;
 use mysqli_stmt;
+use SensitiveParameter;
 use Throwable;
 use function array_key_exists;
 use function array_merge;
@@ -163,7 +164,14 @@ class SqlExecutor {
      * @param string $coalition default utf8mb4_0900_ai_ci
      * @param int $flags
      */
-    public function __construct(array $connect, array $connect_options = [], string $charset = 'utf8', string $coalition = 'utf8_unicode_ci', int $flags = 0) {
+    public function __construct(
+      #[SensitiveParameter]
+      array $connect,
+        array $connect_options = [],
+        string $charset = 'utf8',
+        string $coalition = 'utf8_unicode_ci',
+        int $flags = 0
+    ) {
         $this->connect = array_merge($this->connect, $connect) ;
         $this->connect_options = array_merge($this->connect_options, $connect_options);
         $this->charset = $charset;
@@ -189,7 +197,7 @@ class SqlExecutor {
                 $this->mysqli->set_charset($this->charset);
                 // $charset = SqlUtils::strIt($this->charset);
                 // $coalition = SqlUtils::strIt($this->coalition);
-                $this->query( "SET NAMES ? COLLATE ?", [$this->charset, $this->coalition]);
+                $this->query( "SET NAMES $this->charset COLLATE $this->coalition");
                 return;
             }
         }

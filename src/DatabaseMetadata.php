@@ -17,7 +17,7 @@ class DatabaseMetadata {
     protected SqlExecutor $sqlExecutor;
     protected array $tableColumns = [];
     protected array $primaryKeys = [];
-
+    protected array $foreignKeys = [];
 
     protected function __construct(SqlExecutor $sqlExecutor) {$this->sqlExecutor = $sqlExecutor;}
 
@@ -100,8 +100,42 @@ class DatabaseMetadata {
     public function clear(): void {
         $this->primaryKeys = [];
         $this->tableColumns = [];
+        $this->foreignKeys = [];
     }
+    /**
+     * Get foreign key constraints for a table
+     *
+     * @param string $tableName
+     * @return array [column_name => ['referenced_table' => string, 'referenced_column' => string]]
+     * @throws Exception
+     */
+    public function getForeignKeys(string $tableName): array {
+        if (empty($tableName)) {
+            return [];
+        }
 
+        if (!isset($this->foreignKeys[$tableName])) {
+            $sql = "SELECT /" . __METHOD__ . "/ 
+                    kcu.COLUMN_NAME,
+                    kcu.REFERENCED_TABLE_NAME,
+                    kcu.REFERENCED_COLUMN_NAME
+                FROM information_schema.KEY_COLUMN_USAGE kcu
+                WHERE kcu.TABLE_SCHEMA = DATABASE()
+                    AND kcu.TABLE_NAME = ?
+                    AND kcu.REFERENCED_TABLE_NAME IS NOT NULL";
+
+            $fks = [];
+            foreach ($this->sqlExecutor->array($sql, [$tableName]) as $row) {
+                $fks[$row['COLUMN_NAME']] = [
+                  'referenced_table' => $row['REFERENCED_TABLE_NAME'],
+                  'referenced_column' => $row['REFERENCED_COLUMN_NAME']
+                ];
+            }
+            $this->foreignKeys[$tableName] = $fks;
+        }
+
+        return $this->foreignKeys[$tableName];
+    }
 
     protected function getType($field): string {
         $types = [
