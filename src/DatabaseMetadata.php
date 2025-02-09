@@ -214,23 +214,4 @@ class DatabaseMetadata {
         return $baseType;
     }
 
-    /**
-     * @throws Exception
-     */
-    final protected function __sleep() {throw new Exception("Cannot serialize a singleton.");}
-
-    /**
-     * @throws Exception */
-    final public function __wakeup() {throw new Exception("Cannot unserialize a singleton.");}
-
-    /**
-     * @throws Exception
-     */
-    final protected function __clone() {throw new Exception("Cannot clone a singleton.");}
-
-    /**
-     * @throws Exception
-     */
-    final public static function __set_state(array $an_array) {throw new Exception('Cannot instantiate singleton via __set_state.');}
-
 }

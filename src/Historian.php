@@ -70,19 +70,20 @@ class Historian {
           'motive' => $motive,
           'pk' => $this->primaryKeyEncode($pk),
           'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS),
-          'user_nick' => empty($user_nick) ? $_SESSION['usuario'] : $user_nick,
+          'user_nick' => empty($user_nick) ? ($_SESSION['nick'] ?? $_SESSION['usuario'] ?? '?') : $user_nick,
+          'date' => 'NOW(6)',
           'date' => 'NOW(6)'
         ];
         $this->queryBuilder->insert($this->tableHistory, $insertValues);
         $insertHistorySql = $this->queryBuilder->insert($this->tableHistory, $insertValues);
         try {
-            $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['params']);
+            $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
             return;
         } catch (Exception) { }
         if($this->sqlExecutor->is_last_error_table_not_found())
             try {
                 $this-> historyTableCreate();
-                $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['params']);
+                $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
             } catch (Exception) {}
     }
 
