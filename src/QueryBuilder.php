@@ -42,7 +42,7 @@ class QueryBuilder {
         foreach($array as $columnName => $value) {
             $col = SqlUtils::fieldIt($columnName);
             $columns[] = $col;
-            if(array_key_exists($value, $this->dontQuoteValue)) {
+            if(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
                 $values[] = $value;
             } else {
                 $values[] = "?";
@@ -74,7 +74,7 @@ class QueryBuilder {
         $parameters = [];
         foreach($array as $columnName => $value) {
             $col = SqlUtils::fieldIt($columnName);
-            if(array_key_exists($value, $this->dontQuoteValue)) {
+            if(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
                 $set[] = "$col=$value";
             } else {
                 $set[] = "$col=?";
@@ -99,12 +99,12 @@ class QueryBuilder {
         $parameters = [];
         foreach($array as $columnName => $value) {
             $col = SqlUtils::fieldIt($columnName);
-            if(array_key_exists($value, $this->dontQuoteValue)) {
+            if(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
                 $clause[] = "$col=$value";
             } elseif(is_array($value)) {
                 $in = [];
                 foreach($value as $v) {
-                    if(array_key_exists($v, $this->dontQuoteValue))
+                    if(is_string($v) && array_key_exists($v, $this->dontQuoteValue))
                         $in[] = $v;
                     else {
                         $in[] = "?";

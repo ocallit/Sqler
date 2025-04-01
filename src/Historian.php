@@ -26,6 +26,7 @@ use function is_array;
  *   $lastChange = $history->getLastChange($primaryKeyValues);
  */
 class Historian {
+    public static $SESSION_USER_NICK_KEY = 'nick';
     protected array $ingoreDifferenceForFields = [
       'ultimo_cambio', 'ultimo_cambio_por',
       'last_changed', 'last_changed_by',
@@ -70,8 +71,7 @@ class Historian {
           'motive' => $motive,
           'pk' => $this->primaryKeyEncode($pk),
           'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS),
-          'user_nick' => empty($user_nick) ? ($_SESSION['nick'] ?? $_SESSION['usuario'] ?? '?') : $user_nick,
-          'date' => 'NOW(6)',
+          'user_nick' => empty($user_nick) ? ($_SESSION[self::$SESSION_USER_NICK_KEY] ?? '?') : $user_nick,
           'date' => 'NOW(6)'
         ];
         $this->queryBuilder->insert($this->tableHistory, $insertValues);
