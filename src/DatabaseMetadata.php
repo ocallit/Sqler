@@ -156,6 +156,65 @@ class DatabaseMetadata {
         return $this->foreignKeys[$tableName];
     }
 
+    public function foreignKeysAll(): array {
+        $parents =[];
+        $childs = [];
+        $fk = [];
+        $method = __METHOD__;
+        $sql = "
+        SELECT /*$method*/
+            tc.CONSTRAINT_NAME,
+            tc.TABLE_NAME AS child_table,
+            kcu.COLUMN_NAME AS child_column,
+            kcu.REFERENCED_TABLE_NAME AS parent_table,
+            kcu.REFERENCED_COLUMN_NAME AS parent_column,
+            rc.UPDATE_RULE AS on_update_action,
+            rc.DELETE_RULE AS on_delete_action
+        FROM
+            INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc ON tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+        WHERE
+            tc.CONSTRAINT_TYPE = 'FOREIGN KEY' AND tc.TABLE_SCHEMA = DATABASE()
+        ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION";
+
+        $data = $this->sqlExecutor->array($sql);
+        foreach($data as $row) {
+            $constraint_name = $row['CONSTRAINT_NAME'];
+            $parentTable = $row['child_table'];
+            $chidTable = $row['parent_table'];
+
+            if(!array_key_exists($constraint_name, $fk)) {
+                $childs[$chidTable][$parentTable][$constraint_name] =
+                $parents[$parentTable][$chidTable][$constraint_name] =
+                $fk[$constraint_name] = [
+                  'constraint_name'=>$constraint_name,
+                  'on_delete_action'=>$row['on_delete_action'],
+                  'on_update_action'=>$row['on_update_action'],
+
+                  'child_table'=>$row['child_table'],
+                  'child_column'=>[$row['child_column']],
+
+                  'parent_table'=>$row['parent_table'],
+                  'parent_column'=>[$row['parent_column']],
+
+                ];
+                continue;
+            }
+
+            $parents[$parentTable][$chidTable][$constraint_name]['child_column'][] =
+            $childs[$chidTable][$parentTable][$constraint_name]['child_column'][] =
+            $fk[$constraint_name]['child_column'][] =
+              $row['child_column'];
+
+            $parents[$parentTable][$chidTable][$constraint_name]['parent_column'][] =
+            $childs[$chidTable][$parentTable][$constraint_name]['parent_column'][] =
+            $fk[$constraint_name]['parent_column'][] =
+              $row['parent_column'];
+        }
+        return ['childs' => $childs, 'parents' => $parents, 'foreign_keys' => $fk];
+    }
+
     protected function getType($field): string {
         $types = [
           MYSQLI_TYPE_TINY => 'tinyint',
