@@ -58,7 +58,7 @@ class QueryBuilder {
             }
         }
         if(!empty($comment))
-            $comment = "/*" . __METHOD__ - "*/";
+            $comment = "/*" . __METHOD__ . "*/";
 
         $insert = "INSERT $comment " .
             " INTO " . SqlUtils::fieldIt($table) . "(" . implode(",", $columns) . ") " .
@@ -82,7 +82,7 @@ class QueryBuilder {
             }
         }
         if(!empty($comment))
-            $comment = "/*" . __METHOD__ - "*/";
+            $comment = "/*" . __METHOD__ . "*/";
 
         $whereArray = $this->where($where);
         $update = "UPDATE $comment " . SqlUtils::fieldIt($table) . " SET " . implode(",", $set) .

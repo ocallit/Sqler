@@ -16,7 +16,7 @@
 
 ## AI Assistant Documentation
 
-**For AI assistants and comprehensive API reference**: See [SQLER_AI_DOCUMENTATION.md](SQLER_AI_DOCUMENTATION.md) - This contains detailed method signatures, return types, usage patterns, and examples specifically formatted for AI assistance.
+**For AI assistants and comprehensive API reference**: See [Sqler_AI_DOCUMENTATION.md](Sqler_AI_DOCUMENTATION.md) - This contains detailed method signatures, return types, usage patterns, and examples specifically formatted for AI assistance.
 
 ## Installation & Quick Start
 

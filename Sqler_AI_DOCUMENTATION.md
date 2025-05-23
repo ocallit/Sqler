@@ -414,11 +414,11 @@ $primaryKeys = $meta->primaryKeys();
 
 ## Potential Issues Identified
 
-1. **QueryBuilder Bug**: Line with `"/*" . __METHOD__ - "*/";` should use `.` instead of `-`
-2. **Historian Logic**: In `diff()` method, the loop seems to have inverted logic - `continue` when `$differ` is not empty
-3. **Transaction Counter**: `openTransactions` counter could get out of sync if exceptions occur during begin/commit/rollback
-4. **Memory Usage**: Logs have max entries but no cleanup mechanism
-5. **Error Handling**: Some methods don't check if `mysqli` is null before accessing properties
+
+1. **Historian Logic**: In `diff()` method, the loop seems to have inverted logic - `continue` when `$differ` is not empty
+2. **Transaction Counter**: `openTransactions` counter could get out of sync if exceptions occur during begin/commit/rollback
+3. **Memory Usage**: Logs have max entries but no cleanup mechanism
+4. **Error Handling**: Some methods don't check if `mysqli` is null before accessing properties they throw an error
 
 ---
 
