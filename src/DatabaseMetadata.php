@@ -5,9 +5,9 @@ namespace Ocallit\Sqler;
 
 use Exception;
 use RuntimeException;
+
 /**
- * DatabaseMetadata 0.0.1 WIP
- * @TODO UniqueKeys: per table, per table.field, fields are unique tmemself, FK, FK from standard field names, de ida y vuelta
+ * DatabaseMetadata 0.0.2
  *
  */
 class DatabaseMetadata {
@@ -215,6 +215,14 @@ class DatabaseMetadata {
         return ['childs' => $childs, 'parents' => $parents, 'foreign_keys' => $fk];
     }
 
+    /**
+     * field class to mysql data type string, in lower case
+     *
+     * @pure
+     * @param $field
+     * @return string
+     * @throws Exception
+     */
     protected function getType($field): string {
         $types = [
           MYSQLI_TYPE_TINY => 'tinyint',

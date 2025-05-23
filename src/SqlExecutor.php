@@ -309,6 +309,8 @@ class SqlExecutor {
     }
 
     /**
+     * Multi-dimensional array keyed by specified columns in $keys, the rest of the column sin a key:value array
+     *
      * @param string|mysqli_stmt $query
      * @param array $keys
      * @param array $parameters
@@ -336,6 +338,8 @@ class SqlExecutor {
     }
 
     /**
+     * Multi-dimensional array keyed by specified columns number 1 to $numFields the rest of the columns in a key:value array
+     *
      * @param string|mysqli_stmt $query
      * @param int $numFields Number of fields to use as keys
      * @param array $parameters
@@ -368,6 +372,8 @@ class SqlExecutor {
     }
 
     /**
+     * Multi-dimensional array using all but last column as keys, last column as values
+     *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param array $default
@@ -517,6 +523,12 @@ class SqlExecutor {
         } finally { $this->freeResult($result ?? false); }
     }
 
+    /**
+     * return mysqli->errno or 0
+     *
+     * @pure
+     * @return int
+     */
     public function getLastErrorNumber(): int {
         try {
             if(!$this->mysqli) return 0;
@@ -527,7 +539,7 @@ class SqlExecutor {
     /**
      * Checks if the last error was a "table not found" error
      * This includes ERROR_TABLE_NOT_FOUND, ERROR_NO_SUCH_TABLE, and ERROR_UNKNOWN_TABLE
-     *
+     * @pure
      * @return bool True if the last error was a table not found error
      */
     public function is_last_error_table_not_found(): bool {
@@ -543,7 +555,7 @@ class SqlExecutor {
     /**
      * Checks if the last error was a duplicate/unique key violation
      * This includes both unique key and primary key violations
-     *
+     * @pure
      * @return bool True if the last error was a duplicate key error
      */
     public function is_last_error_duplicate_key(): bool {
@@ -558,7 +570,7 @@ class SqlExecutor {
     /**
      * Checks if the last error was a foreign key violation
      * This checks for invalid foreign key references
-     *
+     * @pure
      * @return bool True if the last error was a foreign key violation
      */
     public function is_last_error_invalid_foreign_key(): bool {
@@ -573,7 +585,7 @@ class SqlExecutor {
     /**
      * Checks if the last error was due to existing child records
      * This occurs when trying to delete a parent record that has child records
-     *
+     * @pure
      * @return bool True if the last error was due to existing child records
      */
     public function is_last_error_child_records_exist(): bool {
@@ -585,7 +597,7 @@ class SqlExecutor {
     /**
      * Checks if the last error was related to a non-existent column
      * This includes unknown column and incorrect column name errors
-     *
+     * @pure
      * @return bool True if the last error was a column not found error
      */
     public function is_last_error_column_not_found(): bool {
@@ -598,8 +610,16 @@ class SqlExecutor {
         ], true);
     }
 
+    /**
+     * @return array
+     * @pure
+     */
     public function getLog(): array {return $this->log;}
 
+    /**
+     * @return array
+     * @pure
+     */
     public function getErrorLog(): array {return $this->logError;}
 
     /**
@@ -711,7 +731,8 @@ class SqlExecutor {
     protected function logErrorAdd(int $errorNumber, string $errorMessage, string|mysqli_stmt $query, array $parameters, $attempt):void {
         if(count($this->logError) > $this->maxLogEntries)
             return;
-        $this->logError[] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt];
+        $template = SqlUtils::createQueryTemplate($query);
+        $this->logError[$template] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt, "template" => $template];
     }
 
 }

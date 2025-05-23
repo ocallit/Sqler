@@ -31,8 +31,20 @@ class QueryBuilder {
         $this->useNewOnDuplicate = $useNewOnDuplicate;
     }
 
+    /**
+     * Returns an insert statement using array keys as column names and values as values, and the parameters
+     * @pure
+     *
+     * @param $table
+     * @param $array
+     * @param bool $onDuplicateKeyUpdate
+     * @param array $onDuplicateKeyDontUpdate
+     * @param array $onDuplicateKeyOverride
+     * @param string $comment
+     * @return array
+     */
     public function insert($table, $array,
-           $onDuplicateKeyUpdate = false, $onDuplicateKeyDontUpdate = [], $onDuplicateKeyOverride = [],
+           bool $onDuplicateKeyUpdate = false, $onDuplicateKeyDontUpdate = [], $onDuplicateKeyOverride = [],
            $comment = ''
     ):array {
         $columns = [];
@@ -69,6 +81,16 @@ class QueryBuilder {
         return ["query" => $insert, "parameters" => $parameters];
     }
 
+    /**
+     * Returns an update statement using array keys as column names and values as values, same with where, and the parameters
+     * @pure
+     *
+     * @param string $table
+     * @param array $array
+     * @param array $where
+     * @param string $comment
+     * @return array
+     */
     public function update(string $table, array $array, array $where = [], string $comment = ''):array {
         $set = [];
         $parameters = [];
@@ -90,6 +112,15 @@ class QueryBuilder {
         return ["query" => $update, "parameters" => array_merge($parameters, $whereArray['parameters']) ];
     }
 
+    /**
+     * Returns a where statement using array keys as column names and values as values, concatenated with $op, and the parameters
+     * @pure
+     *
+     * @param $array
+     * @param $op
+     * @param $comment
+     * @return array
+     */
     public function where($array, $op = "AND", $comment = ""):array {
         if(!empty($comment))
             $comment = "/*$comment*/";
