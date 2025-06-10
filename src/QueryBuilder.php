@@ -69,7 +69,7 @@ class QueryBuilder {
                     $onDuplicateKey[] = "$col=VALUES($col)";
             }
         }
-        if(!empty($comment))
+        if(empty($comment))
             $comment = "/*" . __METHOD__ . "*/";
 
         $insert = "INSERT $comment " .
@@ -103,7 +103,7 @@ class QueryBuilder {
                 $parameters[] = $value;
             }
         }
-        if(!empty($comment))
+        if(empty($comment))
             $comment = "/*" . __METHOD__ . "*/";
 
         $whereArray = $this->where($where);

@@ -92,17 +92,17 @@ class SqlExecutor {
      * Mysqli errors on which to retry the transaction or query if not inside a transaction.
      *
      * @var array $retryOnErrors  mysqli errors on which to retry if not inside transaction
-     * * Error: 1015 SQLSTATE: HY000 (ER_CANT_LOCK) Message: Can't lock file (errno: %d)
-     * * Error?: 1027 SQLSTATE: HY000 (ER_FILE_USED) Message: '%s' is locked against change
-     * * Error: 1689 SQLSTATE: HY000 (ER_LOCK_ABORTED) Message: Wait on a lock was aborted due to a pending exclusive lock
-     * * Error: 1205 SQLSTATE: HY000 (ER_LOCK_WAIT_TIMEOUT) Message: Lock wait timeout exceeded; try restarting transaction
-     * * Error: 1206 SQLSTATE: HY000 (ER_LOCK_TABLE_FULL) Message: The total number of locks exceeds the lock table size
-     * * Error: 1213 SQLSTATE: 40001 (ER_LOCK_DEADLOCK) Message: Deadlock found when trying to get lock; try restarting transaction
-     * * Error: 1622 SQLSTATE: HY000 (ER_WARN_ENGINE_TRANSACTION_ROLLBACK) Message: Storage engine %s does not support rollback for this statement.
+     * Error: 1015 SQLSTATE: HY000 (ER_CANT_LOCK) Message: Can't lock file (errno: %d)
+     * Error?: 1027 SQLSTATE: HY000 (ER_FILE_USED) Message: '%s' is locked against change
+     * Error: 1689 SQLSTATE: HY000 (ER_LOCK_ABORTED) Message: Wait on a lock was aborted due to a pending exclusive lock
+     * Error: 1205 SQLSTATE: HY000 (ER_LOCK_WAIT_TIMEOUT) Message: Lock wait timeout exceeded; try restarting transaction
+     * Error: 1206 SQLSTATE: HY000 (ER_LOCK_TABLE_FULL) Message: The total number of locks exceeds the lock table size
+     * Error: 1213 SQLSTATE: 40001 (ER_LOCK_DEADLOCK) Message: Deadlock found when trying to get lock; try restarting transaction
+     * Error: 1622 SQLSTATE: HY000 (ER_WARN_ENGINE_TRANSACTION_ROLLBACK) Message: Storage engine %s does not support rollback for this statement.
      *      Transaction rolled back and must be restarted
-     * * Error: 1614 SQLSTATE: XA102 (ER_XA_RBDEADLOCK) Message: XA_RBDEADLOCK: Transaction branch was rolled back: deadlock was detected
-     * * Error: 2006 (CR_SERVER_GONE_ERROR) Message: MySQL server has gone away
-     * * Error: 2013 (CR_SERVER_LOST) Message: Lost connection to MySQL server during query
+     * Error: 1614 SQLSTATE: XA102 (ER_XA_RBDEADLOCK) Message: XA_RBDEADLOCK: Transaction branch was rolled back: deadlock was detected
+     * Error: 2006 (CR_SERVER_GONE_ERROR) Message: MySQL server has gone away
+     * Error: 2013 (CR_SERVER_LOST) Message: Lost connection to MySQL server during query
      *
      * @see IacMysqli::runSql() IacMysqli::runSql()
      * 
@@ -373,11 +373,25 @@ class SqlExecutor {
 
     /**
      * Multi-dimensional array using all but last column as keys, last column as values
+     * 
+     * For example, with a result set:
+     * Row 1: ['A', 'B', 'Value1']
+     * Row 2: ['A', 'C', 'Value2']
+     *
+     * The result would be:
+     * [
+     *   'A' => [
+     *     'B' => 'Value1',
+     *     'C' => 'Value2'
+     *   ]
+     * ]
+     * This method allows for a flexible structure where the last column can be a primitive sql type.
+     * Note: If multiple rows have the same key structure, later rows will overwrite earlier ones.
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param array $default
-     * @return array
+     * @return array Multi-dimensional array using all but last column as keys, last column as values
      * @throws Exception
      */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {

@@ -74,7 +74,7 @@ class Historian {
           'user_nick' => empty($user_nick) ? ($_SESSION[self::$SESSION_USER_NICK_KEY] ?? '?') : $user_nick,
           'date' => 'NOW(6)'
         ];
-        $this->queryBuilder->insert($this->tableHistory, $insertValues);
+
         $insertHistorySql = $this->queryBuilder->insert($this->tableHistory, $insertValues);
         try {
             $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
