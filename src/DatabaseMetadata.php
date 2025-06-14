@@ -122,7 +122,7 @@ class DatabaseMetadata {
         $this->foreignKeys = [];
     }
     /**
-     * Get foreign key constraints for a table
+     * Get foreign key constraints for a table as [column_name => ['referenced_table' => string, 'referenced_column' => string]]
      *
      * @param string $tableName
      * @return array [column_name => ['referenced_table' => string, 'referenced_column' => string]]
@@ -164,10 +164,10 @@ class DatabaseMetadata {
         $sql = "
         SELECT /*$method*/
             tc.CONSTRAINT_NAME,
-            tc.TABLE_NAME AS child_table,
-            kcu.COLUMN_NAME AS child_column,
-            kcu.REFERENCED_TABLE_NAME AS parent_table,
-            kcu.REFERENCED_COLUMN_NAME AS parent_column,
+            tc.TABLE_NAME AS referencing_table,
+            kcu.COLUMN_NAME AS referencing_column,
+            kcu.REFERENCED_TABLE_NAME AS referenced_table,
+            kcu.REFERENCED_COLUMN_NAME AS referenced_column,
             rc.UPDATE_RULE AS on_update_action,
             rc.DELETE_RULE AS on_delete_action
         FROM
@@ -181,8 +181,8 @@ class DatabaseMetadata {
         $data = $this->sqlExecutor->array($sql);
         foreach($data as $row) {
             $constraint_name = $row['CONSTRAINT_NAME'];
-            $parentTable = $row['child_table'];
-            $chidTable = $row['parent_table'];
+            $parentTable = $row['referencing_table'];
+            $chidTable = $row['referenced_table'];
 
             if(!array_key_exists($constraint_name, $fk)) {
                 $childs[$chidTable][$parentTable][$constraint_name] =
@@ -192,27 +192,27 @@ class DatabaseMetadata {
                   'on_delete_action'=>$row['on_delete_action'],
                   'on_update_action'=>$row['on_update_action'],
 
-                  'child_table'=>$row['child_table'],
-                  'child_column'=>[$row['child_column']],
+                  'referencing_table'=>$row['referencing_table'],
+                  'referencing_column'=>[$row['referencing_column']],
 
-                  'parent_table'=>$row['parent_table'],
-                  'parent_column'=>[$row['parent_column']],
+                  'referenced_table'=>$row['referenced_table'],
+                  'referenced_column'=>[$row['referenced_column']],
 
                 ];
                 continue;
             }
 
-            $parents[$parentTable][$chidTable][$constraint_name]['child_column'][] =
-            $childs[$chidTable][$parentTable][$constraint_name]['child_column'][] =
-            $fk[$constraint_name]['child_column'][] =
-              $row['child_column'];
+            $parents[$parentTable][$chidTable][$constraint_name]['referencing_column'][] =
+            $childs[$chidTable][$parentTable][$constraint_name]['referencing_column'][] =
+            $fk[$constraint_name]['referencing_column'][] =
+              $row['referencing_column'];
 
-            $parents[$parentTable][$chidTable][$constraint_name]['parent_column'][] =
-            $childs[$chidTable][$parentTable][$constraint_name]['parent_column'][] =
-            $fk[$constraint_name]['parent_column'][] =
-              $row['parent_column'];
+            $parents[$parentTable][$chidTable][$constraint_name]['referenced_column'][] =
+            $childs[$chidTable][$parentTable][$constraint_name]['referenced_column'][] =
+            $fk[$constraint_name]['referenced_column'][] =
+              $row['referenced_column'];
         }
-        return ['childs' => $childs, 'parents' => $parents, 'foreign_keys' => $fk];
+        return ['referencedBy' => $childs, 'references' => $parents, 'foreign_keys' => $fk];
     }
 
     /**

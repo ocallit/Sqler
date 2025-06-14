@@ -229,7 +229,7 @@ DatabaseMetadata::getInstance(): static
 
 #### `foreignKeysAll(): array`
 **Returns**: Complete foreign key information for database
-**Shape**: `['childs' => [...], 'parents' => [...], 'foreign_keys' => [...]]`
+**Shape**: `['referencedBy' => [...], 'references' => [...], 'foreign_keys' => [...]]`
 **Purpose**: Get comprehensive foreign key relationships
 
 #### `query(string $query, array $parameters = []): array`
