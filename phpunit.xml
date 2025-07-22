@@ -1,0 +1,46 @@
+<phpunit
+        bootstrap="vendor/autoload.php"
+        colors="true"
+        stopOnFailure="false"
+        failOnRisky="true"
+        failOnWarning="true"
+        executionOrder="random"
+        cacheResult="true"
+        cacheDirectory="build/.phpunit.cache"
+        beStrictAboutOutputDuringTests="true"
+>
+
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+
+    <coverage>
+        <report>
+            <clover outputFile="build/logs/clover.xml"/>
+            <cobertura outputFile="build/logs/cobertura.xml"/>
+            <crap4j outputFile="build/logs/crap4j.xml"/>
+            <html outputDirectory="build/reports/phpUnit/html-coverage"/>
+            <xml outputDirectory="build/logs/coverage-xml"/>
+            <text outputFile="build/reports/phpUnit/coverage.txt"/>
+        </report>
+    </coverage>
+
+    <logging>
+        <junit outputFile="build/logs/junit.xml"/>
+        <teamcity outputFile="build/logs/teamcity.txt"/>
+        <testdoxHtml outputFile="build/reports/phpUnit/testdox.html"/>
+        <testdoxText outputFile="build/reports/phpUnit/testdox.txt"/>
+    </logging>
+
+</phpunit>
