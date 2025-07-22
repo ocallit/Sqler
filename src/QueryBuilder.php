@@ -113,15 +113,11 @@ class QueryBuilder {
     }
 
     /**
-     * Returns a where statement using array keys as column names and values as values, concatenated with $op, and the parameters
+     * Returns a where statement using array keys as column names and values as values, concatenated with $conjunction, and the parameters
      * @pure
      *
-     * @param $array
-     * @param $op
-     * @param $comment
-     * @return array
      */
-    public function where($array, $op = "AND", $comment = ""):array {
+    public function where(array $array, string $conjunction = "AND", string $comment = ""):array {
         if(!empty($comment))
             $comment = "/*$comment*/";
         if(empty($array))
@@ -133,23 +129,23 @@ class QueryBuilder {
             if(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
                 $clause[] = "$col=$value";
             } elseif(is_array($value)) {
-                $in = [];
+                $inClause = [];
                 foreach($value as $v) {
                     if(is_string($v) && array_key_exists($v, $this->dontQuoteValue))
-                        $in[] = $v;
+                        $inClause[] = $v;
                     else {
-                        $in[] = "?";
+                        $inClause[] = "?";
                         $parameters[] = $v;
                     }
                 }
-                if(!empty($in))
-                    $clause[] = "$col IN (" . implode(",", $in) . ")";
+                if(!empty($inClause))
+                    $clause[] = "$col IN (" . implode(",", $inClause) . ")";
             } else {
                 $clause[] = "$col=?";
                 $parameters[] = $value;
             }
         }
-        return ["query" => " $comment (" . implode(" $op ", $clause) . ")", "parameters" => $parameters];
+        return ["query" => " $comment (" . implode(" $conjunction ", $clause) . ")", "parameters" => $parameters];
     }
 
 }

@@ -11,5 +11,54 @@
     "psr-4": {
       "Ocallit\\Sqler\\": "src/"
     }
+  },
+  "scripts": {
+    "build:dirs": [
+      "@php -r \"$dirs = ['build', 'build/logs', 'build/logs/pdepend', 'build/reports', 'build/reports/phpunit', 'build/reports/phpmd', 'build/reports/pdepend', 'build/reports/phpmetrics']; foreach($dirs as $dir) { if(!is_dir($dir)) { mkdir($dir, 0755, true); echo 'Created: ' . $dir . PHP_EOL; } }\""
+    ],
+
+    "test": "php tools/phpunit.phar",
+
+    "phpmd": [
+      "php tools/phpmd.phar src xml cleancode,codesize,controversial,design,naming,unusedcode --reportfile build/reports/phpmd/pmd.xml || echo PHPMD XML completed",
+      "php tools/phpmd.phar src html cleancode,codesize,controversial,design,naming,unusedcode --reportfile build/reports/phpmd/report.html || echo PHPMD HTML completed"
+    ],
+
+    "pdepend": [
+      "php tools/pdepend.phar --summary-xml=build/reports/pdepend/summary.xml --jdepend-chart=build/reports/pdepend/jdepend.svg --overview-pyramid=build/reports/pdepend/pyramid.svg --dependency-xml=build/reports/pdepend/dependencies.xml --jdepend-xml=build/reports/pdepend/dependency_log.xml --ignore=vendor,test,tests,example,exampes,tools,build,dist --coverage-report=build/logs/clover.xml src",
+      "php tools/pdepend_util/pdepend_report.php build/reports/pdepend/ build/reports/pdepend/ Ocallit Ocallit\\\\Sqler"
+    ],
+
+    "phpmetrics": "php tools/phpmetrics.phar --report-html=build/reports/phpmetrics --report-json=build/reports/phpmetrics/metrics.json --report-violations=build/reports/phpmetrics/violations.xml --chart-bubbles=build/reports/phpmetrics/bubbles.svg --junit=build/logs/junit.xml --coverage-clover=build/logs/clover.xml --pdepend-summary-xml=build/reports/pdepend/summary.xml --phpmd-xml=build/reports/phpmd/pmd.xml src",
+
+    "reports": [
+      "@build:dirs",
+      "@test",
+      "@phpmd",
+      "@pdepend",
+      "@phpmetrics",
+      "@php -r \"echo PHP_EOL . '🎉 All reports generated!' . PHP_EOL . 'Main dashboard: build/reports/phpmetrics/index.html' . PHP_EOL . 'PDepend reports: build/reports/pdepend/summary.html' . PHP_EOL;\""
+    ],
+
+    "reports:quick": [
+      "@build:dirs",
+      "@phpmd",
+      "@pdepend",
+      "@phpmetrics",
+      "@php -r \"echo PHP_EOL . '⚡ Quick reports ready!' . PHP_EOL . 'Dashboard: build/reports/phpmetrics/index.html'  . PHP_EOL . 'PDepend reports: build/reports/pdepend/summary.html' . PHP_EOL;\""
+    ],
+
+    "clean": "@php -r \"function delTree($dir) { if (!is_dir($dir)) return; $files = array_diff(scandir($dir), ['.','..']); foreach ($files as $file) { $path = $dir.'/'.$file; is_dir($path) ? delTree($path) : unlink($path); } rmdir($dir); } if(is_dir('build')) { delTree('build'); echo 'Build directory cleaned.' . PHP_EOL; }\""
+  },
+
+  "scripts-descriptions": {
+    "build:dirs": "Create all necessary directories",
+    "test": "Run PHPUnit tests with coverage",
+    "phpmd": "Run PHP Mess Detector",
+    "pdepend": "Run PDepend analysis + generate HTML reports",
+    "phpmetrics": "Generate PHPMetrics dashboard",
+    "reports": "Complete analysis tests + reports",
+    "reports:quick": "Quick analysis (metrics only)",
+    "clean": "Clean all build artifacts"
   }
 }

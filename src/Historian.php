@@ -26,7 +26,7 @@ use function is_array;
  *   $lastChange = $history->getLastChange($primaryKeyValues);
  */
 class Historian {
-    public static $SESSION_USER_NICK_KEY = 'nick';
+    public static $SessionNickKey = 'nick';
     protected array $ingoreDifferenceForFields = [
       'ultimo_cambio', 'ultimo_cambio_por',
       'last_changed', 'last_changed_by',
@@ -36,7 +36,7 @@ class Historian {
     protected string $jsonSqlType = 'JSON';
     protected string $table;
     protected string $tableHistory;
-    protected array $pk;
+    protected array $primaryKeys;
     protected SqlExecutor $sqlExecutor;
     protected QueryBuilder $queryBuilder;
 
@@ -47,9 +47,9 @@ class Historian {
         $this->table = $table;
         $this->tableHistory = $table . '_hist';
         if(count($primaryKeyFieldNames) > 0)
-            $this->pk = $primaryKeyFieldNames;
+            $this->primaryKeys = $primaryKeyFieldNames;
         else
-            $this->pk = [$table . '_id'];
+            $this->primaryKeys = [$table . '_id'];
         $this->ingoreDifferenceForFields = array_merge($this->ingoreDifferenceForFields, $ingoreDifferenceForFields);
     }
 
@@ -59,19 +59,19 @@ class Historian {
 
     /**
      * @param string $action
-     * @param array $pk
+     * @param array $primaryKeys
      * @param array $values
-     * @param string $user_nick
+     * @param string $userNick
      * @param string $motive
      * @return void
      */
-    public function register(string $action, array $pk, array $values, string $user_nick = '',  string $motive = ''):void {
+    public function register(string $action, array $primaryKeys, array $values, string $userNick = '', string $motive = ''):void {
         $insertValues = [
           'action' => $action,
           'motive' => $motive,
-          'pk' => $this->primaryKeyEncode($pk),
+          'pk' => $this->primaryKeyEncode($primaryKeys),
           'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS),
-          'user_nick' => empty($user_nick) ? ($_SESSION[self::$SESSION_USER_NICK_KEY] ?? '?') : $user_nick,
+          'user_nick' => empty($userNick) ? ($_SESSION[self::$SessionNickKey] ?? '?') : $userNick,
           'date' => 'NOW(6)'
         ];
 
@@ -175,9 +175,9 @@ class Historian {
 
     protected function primaryKeyEncode(array $values):string {
         $pkValues = [];
-        foreach($this->pk as $pk)
-            if(array_key_exists($pk, $values))
-                $pkValues[] = $values[$pk];
+        foreach($this->primaryKeys as $primaryKey)
+            if(array_key_exists($primaryKey, $values))
+                $pkValues[] = $values[$primaryKey];
         return implode("\t" ,$pkValues);
     }
 
@@ -203,22 +203,22 @@ class Historian {
             return [];
         $diff = [];
         for($i = 0, $len = count($recordHistory) -1; $i < $len; ++$i) {
-            $h = $recordHistory[$i];
+            $historyRecord = $recordHistory[$i];
             if($i === 0) {
                 $differ = [];
             } else {
-                $differ = $this->differ($recordHistory[$i-1]['record'], $h['record']);
+                $differ = $this->differ($recordHistory[$i-1]['record'], $historyRecord['record']);
                 if(!empty($differ))
                     continue;
             }
             $diff[$i] = [
-                'history_id' => $h['history_id'],
-                'action' => $h['action'],
-                'motive' => $h['motive'],
-                'date' => $h['date'],
-                'user_nick' => $h['user_nick'],
+                'history_id' => $historyRecord['history_id'],
+                'action' => $historyRecord['action'],
+                'motive' => $historyRecord['motive'],
+                'date' => $historyRecord['date'],
+                'user_nick' => $historyRecord['user_nick'],
                 'diff' => $differ,
-                'record' => $h['record'],
+                'record' => $historyRecord['record'],
             ];
         }
         return $diff;

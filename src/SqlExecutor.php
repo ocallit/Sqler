@@ -47,7 +47,7 @@ class SqlExecutor {
       'flags' => 0,
     ];
 
-    protected array $connect_options = [
+    protected array $connectOptions = [
       MYSQLI_INIT_COMMAND => 'SET AUTOCOMMIT = 1',
         //    'MYSQLI_OPT_CONNECT_TIMEOUT' => 10,
     ];
@@ -173,7 +173,7 @@ class SqlExecutor {
         int $flags = 0
     ) {
         $this->connect = array_merge($this->connect, $connect) ;
-        $this->connect_options = array_merge($this->connect_options, $connect_options);
+        $this->connectOptions = array_merge($this->connectOptions, $connect_options);
         $this->charset = $charset;
         $this->coalition = $coalition;
         $this->flags = $flags;
@@ -185,7 +185,7 @@ class SqlExecutor {
      */
     protected function connect():void {
         $this->mysqli = new mysqli();
-        foreach($this->connect_options as $option => $value)
+        foreach($this->connectOptions as $option => $value)
             if(!$this->mysqli->options($option, $value)) {
                 throw new mysqli_sql_exception("Setting $option $value failed");
             }

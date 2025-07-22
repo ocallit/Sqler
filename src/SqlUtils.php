@@ -8,7 +8,7 @@ use function str_replace;
 use function chr;
 
 class SqlUtils {
-    const JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE |JSON_INVALID_UTF8_IGNORE |JSON_INVALID_UTF8_SUBSTITUTE;
+    const JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE;
 
     /**
      * Changes a column name to a nice label or title
@@ -17,8 +17,8 @@ class SqlUtils {
      * @param string $fieldName
      * @return string
      */
-    public static function toLabel(string $fieldName):string {
-        return ucwords(strtolower( str_replace('_', ' ', $fieldName)));
+    public static function toLabel(string $fieldName): string {
+        return ucwords(strtolower(str_replace('_', ' ', $fieldName)));
     }
 
     /**
@@ -31,11 +31,11 @@ class SqlUtils {
      */
     public static function fieldIt(string $fieldName): string {
         $protected = [];
-        foreach(explode('.',$fieldName) as $field)
+        foreach(explode('.', $fieldName) as $field)
             if(preg_match('/^`[^`]*`$/S', $field))
                 $protected[] = $field;
             else
-                $protected[] = '`'. str_replace('`', '', $field ).'`';
+                $protected[] = '`' . str_replace('`', '', $field) . '`';
         return implode('.', $protected);
     }
 
@@ -44,14 +44,14 @@ class SqlUtils {
      * @pure
      * @psalm-pure
      */
-    public static function strIt(string|null $str):string {
-        if($str === null)
+    public static function strIt(string|null $str): string {
+        if($str === NULL)
             return 'NULL';
         return empty($str) ? "''" :
-            "'" . str_replace( ["\\",chr(8),chr(0),chr(26),chr(27)],
-              ["\\\\",'','','',''],
-              str_replace("'","''", "$str")
-            ) . "'";
+          "'" . str_replace(["\\", chr(8), chr(0), chr(26), chr(27)],
+            ["\\\\", '', '', '', ''],
+            str_replace("'", "''", "$str")
+          ) . "'";
     }
 
     /**
@@ -63,13 +63,8 @@ class SqlUtils {
      */
     public static function createQueryTemplate(string $sql): string {
 
-
         $templatedSql = preg_replace("/\s+/", ' ', $sql);
-        if ($templatedSql !== null) {
-            $sql = trim($templatedSql);
-        } else {
-            $sql = trim($sql);
-        }
+        $sql = $templatedSql !== NULL ? trim($templatedSql) : trim($sql);
 
         // Pattern for single-quoted strings (handles MySQL's backslash escapes)
         $singleQuotedStringPattern = "/'([^'\\\\]|\\\\.)*'/S";
@@ -79,11 +74,11 @@ class SqlUtils {
 
         // Replace string literals first to avoid replacing numbers inside strings
         $templatedSql = preg_replace($singleQuotedStringPattern, '?', $sql);
-        if ($templatedSql !== null) {
+        if($templatedSql !== NULL) {
             $sql = $templatedSql;
         }
         $templatedSql = preg_replace($doubleQuotedStringPattern, '?', $sql);
-        if ($templatedSql !== null) {
+        if($templatedSql !== NULL) {
             $sql = $templatedSql;
         }
         // Pattern for numeric literals
@@ -95,17 +90,17 @@ class SqlUtils {
 
         // Replace decimal numbers
         $templatedSql = preg_replace($decimalPattern, '?', $sql);
-        if ($templatedSql !== null) {
+        if($templatedSql !== NULL) {
             $sql = $templatedSql;
         }
         // Replace integer numbers
         $templatedSql = preg_replace($integerPattern, '?', $sql);
-        if ($templatedSql !== null) {
+        if($templatedSql !== NULL) {
             $sql = $templatedSql;
         }
-        // Optional: Normalize whitespace (multiple spaces to one, trim) for further consistency
+        // Normalize whitespace (multiple spaces to one, trim) for further consistency
         $templatedSql = preg_replace('/\s+/', ' ', trim($sql));
-        if ($templatedSql !== null) {
+        if($templatedSql !== NULL) {
             $sql = $templatedSql;
         }
 
