@@ -3,18 +3,22 @@
 CREATE TABLE error_log (
     -- Primary key: hash of the error template for deduplication
     error_hash VARCHAR(16) NOT NULL PRIMARY KEY COMMENT 'xxh3 hash of the normalized error template',
-    
+
+    -- Tracking fields
+    first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When this error template was first encountered',
+    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When this error template was last encountered',
+    seen_count MEDIUMINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Number of times this error template has occurred',
     -- Core error classification
-    error_type ENUM('SQL', 'PHP', 'JS', 'JSON', 'PCRE', 'EXCEPTION') NOT NULL COMMENT 'Type of error for categorization',
+    status ENUM('Bug', 'Fixed', 'Won''t Fix', 'Info') NOT NULL DEFAULT 'Bug' COMMENT 'Error resolution status',
+    error_type ENUM('SQL', 'PHP', 'JS', 'JSON', 'PCRE', 'INFO') NOT NULL COMMENT 'Type of error for categorization',
     error_code VARCHAR(32) DEFAULT '' COMMENT 'Error code (errno, SQL error code, HTTP status, etc.)',
     error_message MEDIUMTEXT DEFAULT '' COMMENT 'Original error message',
-    
-    -- Normalized template and original content
-    template MEDIUMTEXT NOT NULL COMMENT 'Normalized error template with dynamic values replaced by ?',
+
     original MEDIUMTEXT NOT NULL COMMENT 'Original error content (query, message, stack trace, etc.)',
-    
+    template MEDIUMTEXT NOT NULL COMMENT 'Normalized error template with dynamic values replaced by ?',
+
     -- Location information
-    file_path VARCHAR(500) DEFAULT '' COMMENT 'File where error occurred (relative path preferred)',
+    file_path VARCHAR(500) DEFAULT '' COMMENT 'File where error occurred ',
     function_name VARCHAR(255) DEFAULT '' COMMENT 'Function/method name where error occurred',
     line_number INT DEFAULT 0 COMMENT 'Line number (stored but not used in hash)',
     column_number INT DEFAULT 0 COMMENT 'Column number (stored but not used in hash)',
@@ -22,26 +26,15 @@ CREATE TABLE error_log (
     -- Context and environment
     user_agent MEDIUMTEXT DEFAULT '' COMMENT 'Browser user agent for JS errors',
     request_uri VARCHAR(1000) DEFAULT '' COMMENT 'URL/URI where error occurred',
-    user_nick VARCHAR(100) DEFAULT '' COMMENT 'User nickname if available when error occurred',
+    user_nick VARCHAR(16) DEFAULT '' COMMENT 'User nickname if available when error occurred',
     
     -- Additional data (JSON for flexibility)
     context_data JSON DEFAULT NULL COMMENT 'Additional context data (parameters, stack trace, etc.)',
-    
-    -- Tracking fields
-    first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When this error template was first encountered',
-    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When this error template was last encountered',
-    seen_count INT NOT NULL DEFAULT 1 COMMENT 'Number of times this error template has occurred',
-    
-    -- Management fields
-    status ENUM('Bug', 'Fixed', 'Won''t Fix', 'Info') NOT NULL DEFAULT 'Bug' COMMENT 'Error resolution status',
-    developer_comments MEDIUMTEXT NOT NULL DEFAULT '' COMMENT 'Developer notes and comments about this error',
-    
-    -- Metadata
+
+    comment MEDIUMTEXT NOT NULL DEFAULT '' COMMENT 'Developer notes and comment about this error',
     commented_at DATETIME DEFAULT NULL COMMENT 'When developer last commented on this error'
-) ENGINE=InnoDB 
-  DEFAULT CHARSET=utf8mb4 
-  COLLATE=utf8mb4_unicode_ci 
-  COMMENT='Deduplicated error logging with intelligent template grouping';
+) ENGINE=InnoDB
+  COMMENT='Error logging';
 
 -- Example INSERT with ON DUPLICATE KEY UPDATE for deduplication
 -- This matches your ErrorTemplateNormalizer implementation:
@@ -91,15 +84,14 @@ ON DUPLICATE KEY UPDATE
     user_nick = new_error.user_nick,  -- Update to latest user
     context_data = new_error.context_data,  -- Keep latest context
     status = CASE 
-        WHEN status IN ('Won''t Fix', 'Fixed') THEN status  -- Don't change resolved statuses
+        WHEN status = 'Won''t Fix' THEN status  -- Don't change resolved statuses
         ELSE 'Bug'  -- Reset other statuses to Bug on new occurrence
     END;
 
 -- When developer adds a comment, update separately:
 -- UPDATE error_log SET 
---   developer_comments = 'This is caused by missing table migration', 
+--   comment = 'This is caused by missing table migration',
 --   commented_at = CURRENT_TIMESTAMP,
---   status = 'Info'
 -- WHERE error_hash = 'a1b2c3d4e5f67890';
 
 -- You would typically use the ErrorTemplateNormalizer like this:

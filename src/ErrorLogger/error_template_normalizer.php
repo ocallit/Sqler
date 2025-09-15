@@ -48,10 +48,7 @@ class ErrorTemplateNormalizer {
         // Create template combining error type and query pattern
         $template = "SQL_ERROR_{$errorNumber}|{$normalizedMessage}|{$queryTemplate}";
         
-        // Add context if available
-        if (!empty($context)) {
-            $template .= "|{$context}";
-        }
+
         
         $templateHash = hash('xxh3', $template);
         
@@ -101,9 +98,7 @@ class ErrorTemplateNormalizer {
         
         // Create template: error_type + normalized_message + file_path + context
         $template = "PHP_ERROR_{$errno}|{$normalizedMessage}|{$fileContext}";
-        if (!empty($context)) {
-            $template .= "|{$context}";
-        }
+
         
         $templateHash = hash('xxh3', $template);
         
