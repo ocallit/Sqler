@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error Log Interface</title>
+    
+    <!-- Tabulator.js CSS -->
+    <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+    
+    <!-- ocTabulator CSS -->
+    <link rel="stylesheet" href="ocTabulator.css">
+    
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #34495e;
+            --accent-color: #3498db;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+
+        .error-log-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .error-log-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .error-log-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        /* Status badges */
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-bug { background: var(--danger-color); color: white; }
+        .status-fixed { background: var(--success-color); color: white; }
+        .status-wont-fix { background: var(--secondary-color); color: white; }
+        .status-info { background: var(--accent-color); color: white; }
+
+        /* Error type badges */
+        .error-type-badge {
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .error-type-sql { background: #e67e22; color: white; }
+        .error-type-php { background: #9b59b6; color: white; }
+        .error-type-js { background: #f1c40f; color: #2c3e50; }
+        .error-type-info { background: #95a5a6; color: white; }
+
+        /* Stats below table */
+        .error-log-stats {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: var(--secondary-color);
+            border-radius: 0 0 8px 8px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Tabulator customizations */
+        .tabulator {
+            font-size: 13px;
+            border: none;
+        }
+
+        .tabulator-header {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .tabulator-cell.tabulator-editing {
+            background-color: #fff3cd !important;
+            border: 2px solid var(--warning-color) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-log-container">
+        <div class="error-log-header">
+            <h1 class="error-log-title">Error Log Manager</h1>
+        </div>
+        
+        <!-- Main Tabulator Table -->
+        <div id="ocErrorLog-table"></div>
+        
+        <!-- Stats below the table -->
+        <div class="error-log-stats">
+            <div class="stat-item">
+                <span>Total Errors: <strong id="total-errors">--</strong></span>
+            </div>
+            <div class="stat-item">
+                <span>Visible: <strong id="visible-errors">--</strong></span>
+            </div>
+            <div class="stat-item">
+                <span>Selected: <strong id="selected-errors">0</strong></span>
+            </div>
+            <div class="stat-item">
+                <span>Last Updated: <strong id="last-updated">--</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Required scripts -->
+    <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+    <script src="ocTabulatorUtil.js"></script>
+    <script src="ocTabulatorRowSelector.js"></script>
+    <script src="tabulator_row_edit_class.js"></script>
+    
+    <script>
+        // Global variables
+        let table;
+        let selector;
+        let editManager;
+
+        // Set locale for natural sorting
+        ocTabulatorUtil.setLocale("es-MX");
+
+        // Initialize table with server-side everything
+        function initializeTable() {
+            table = new Tabulator("#ocErrorLog-table", {
+                // Server-side operations
+                ajaxURL: "error_log_api_improved.php",
+                ajaxConfig: "POST",
+                ajaxContentType: "json",
+                filterMode: "remote",
+                sortMode: "remote",
+                pagination: true,
+                paginationMode: "remote",
+                paginationSize: 25,
+                paginationSizeSelector: [10, 25, 50, 100],
+                
+                // Default: most recent first, bugs only
+                initialSort: [{column: "last_seen", dir: "desc"}],
+                initialFilter: [{field: "status", type: "=", value: "Bug"}],
+                
+                ajaxParams: { action: "getData" },
+                
+                ajaxResponse: function(url, params, response) {
+                    updateStats(response);
+                    return response.data;
+                },
+
+                ajaxError: function(xhr, textStatus, errorThrown) {
+                    console.error("AJAX Error:", textStatus, errorThrown);
+                    alert("Failed to load data: " + textStatus);
+                },
+
+                columns: [
+                    // 1. Row numbers (first column)
+                    {
+                        formatter: "rownum", 
+                        hozAlign: "center", 
+                        width: 50,
+                        headerSort: false
+                    },
+                    
+                    // 2. Actions column (second column as requested)
+                    TabulatorRowEditManager.getActionsColumnDefinition(),
+                    
+                    // 3. Checkbox selection
+                    ocTabulatorRowSelector.getCheckboxColumnDefinition({
+                        title: '☑',
+                        width: 60
+                    }),
+                    
+                    // 4. Status - inline editable
+                    {
+                        title: "Status",
+                        field: "status",
+                        width: 100,
+                        headerFilter: "select",
+                        headerFilterParams: {
+                            values: {"": "All", "Bug": "Bug", "Fixed": "Fixed", "Won't Fix": "Won't Fix", "Info": "Info"}
+                        },
+                        editor: editManager ? editManager.getSmartEditor("select") : "select",
+                        editorParams: {
+                            values: {"Bug": "Bug", "Fixed": "Fixed", "Won't Fix": "Won't Fix", "Info": "Info"}
+                        },
+                        formatter: function(cell) {
+                            const value = cell.getValue();
+                            const className = `status-${value.toLowerCase().replace(/[^a-z]/g, '-')}`;
+                            return `<span class="status-badge ${className}">${value}</span>`;
+                        }
+                    },
+                    
+                    // 5. Error Type
+                    {
+                        title: "Type",
+                        field: "error_type",
+                        width: 80,
+                        headerFilter: "select",
+                        headerFilterParams: {
+                            values: {"": "All", "SQL": "SQL", "PHP": "PHP", "JS": "JS", "INFO": "INFO"}
+                        },
+                        formatter: function(cell) {
+                            const value = cell.getValue();
+                            const className = `error-type-${value.toLowerCase()}`;
+                            return `<span class="error-type-badge ${className}">${value}</span>`;
+                        }
+                    },
+                    
+                    // 6. Error Code
+                    {
+                        title: "Code",
+                        field: "error_code",
+                        width: 80,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false
+                    },
+                    
+                    // 7. Count with number filtering
+                    {
+                        title: "Count",
+                        field: "seen_count", 
+                        width: 90,
+                        hozAlign: "right",
+                        headerFilter: ocTabulatorUtil.headerFilterNumber,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncNumber,
+                        headerFilterLiveFilter: false,
+                        formatter: function(cell) {
+                            return cell.getValue().toLocaleString();
+                        }
+                    },
+                    
+                    // 8. Error Message
+                    {
+                        title: "Message",
+                        field: "error_message",
+                        width: 300,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false,
+                        formatter: function(cell) {
+                            const value = cell.getValue() || "";
+                            const truncated = value.length > 80 ? value.substring(0, 80) + "..." : value;
+                            return `<span title="${value.replace(/"/g, '&quot;')}">${truncated}</span>`;
+                        }
+                    },
+                    
+                    // 9. File
+                    {
+                        title: "File",
+                        field: "file",
+                        width: 200,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false,
+                        sorter: ocTabulatorUtil.stringSorter,
+                        formatter: function(cell) {
+                            const value = cell.getValue() || "";
+                            const filename = value.split('/').pop();
+                            return `<span title="${value}">${filename}</span>`;
+                        }
+                    },
+                    
+                    // 10. Function
+                    {
+                        title: "Function",
+                        field: "function_name",
+                        width: 150,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false,
+                        sorter: ocTabulatorUtil.stringSorter
+                    },
+                    
+                    // 11. Line Number
+                    {
+                        title: "Line",
+                        field: "line_number",
+                        width: 70,
+                        hozAlign: "right",
+                        headerFilter: ocTabulatorUtil.headerFilterNumber,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncNumber,
+                        headerFilterLiveFilter: false
+                    },
+                    
+                    // 12. Last Seen
+                    {
+                        title: "Last Seen", 
+                        field: "last_seen",
+                        width: 140,
+                        formatter: "datetime",
+                        formatterParams: {
+                            inputFormat: "yyyy-MM-dd HH:mm:ss",
+                            outputFormat: "dd/MM/yy HH:mm"
+                        }
+                    },
+                    
+                    // 13. User
+                    {
+                        title: "User",
+                        field: "user_nick",
+                        width: 100,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false
+                    },
+                    
+                    // 14. Comment - inline editable
+                    {
+                        title: "Comment",
+                        field: "comment",
+                        width: 250,
+                        headerFilter: ocTabulatorUtil.headerFilterString,
+                        headerFilterFunc: ocTabulatorUtil.headerFilterFuncString,
+                        headerFilterLiveFilter: false,
+                        editor: editManager ? editManager.getSmartEditor("textarea") : "textarea",
+                        formatter: function(cell) {
+                            const value = cell.getValue() || "";
+                            if (!value.trim()) return '<em style="color:#999;">Click to add comment</em>';
+                            const truncated = value.length > 50 ? value.substring(0, 50) + "..." : value;
+                            return `<span title="${value.replace(/"/g, '&quot;')}">${truncated}</span>`;
+                        }
+                    }
+                ],
+
+                placeholder: "No error logs found",
+                height: "600px",
+                layout: "fitColumns"
+            });
+
+            // Initialize advanced features
+            initializeFeatures();
+        }
+
+        function initializeFeatures() {
+            // Row selector for checkboxes and bulk operations
+            selector = new ocTabulatorRowSelector(table, {
+                countSelectedId: 'selected-errors'
+            });
+
+            // Row editing manager for inline edit/save/cancel
+            editManager = new TabulatorRowEditManager(table, {
+                saveEndpoint: 'error_log_api_improved.php',
+                idField: 'error_hash',
+                onSaveSuccess: function(id, oldData, newData) {
+                    console.log('Saved:', id);
+                },
+                onSaveError: function(id, error, rowData) {
+                    alert('Save failed: ' + (error.message || 'Unknown error'));
+                    table.redraw(); // Revert changes
+                }
+            });
+
+            // Add export toolbar
+            table.on("tableBuilt", function() {
+                ocTabulatorUtil.toolbar.call(this);
+            });
+
+            // Handle inline editing for status and comment
+            table.on("cellEdited", function(cell) {
+                const field = cell.getField();
+                const value = cell.getValue();
+                const rowData = cell.getRow().getData();
+                
+                if (field === 'status') {
+                    updateErrorStatus(rowData.error_hash, value);
+                } else if (field === 'comment') {
+                    updateErrorComment(rowData.error_hash, value);
+                }
+            });
+
+            // Update stats on data changes
+            table.on("dataFiltered", function(filters, rows) {
+                document.getElementById('visible-errors').textContent = rows.length;
+            });
+
+            table.on("dataLoaded", function() {
+                document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+            });
+        }
+
+        // API calls for inline updates
+        function updateErrorStatus(errorHash, newStatus) {
+            fetch('error_log_api_improved.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'updateStatus',
+                    error_hash: errorHash,
+                    status: newStatus
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.error || 'Update failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error updating status:', error);
+                alert('Failed to update status');
+                table.redraw(); // Revert changes on error
+            });
+        }
+
+        function updateErrorComment(errorHash, newComment) {
+            fetch('error_log_api_improved.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'updateComment',
+                    error_hash: errorHash,
+                    comment: newComment
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.error || 'Update failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error updating comment:', error);
+                alert('Failed to update comment');
+                table.redraw(); // Revert changes on error
+            });
+        }
+
+        function updateStats(response) {
+            document.getElementById('total-errors').textContent = response.total_count || 0;
+            document.getElementById('visible-errors').textContent = response.data ? response.data.length : 0;
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeTable();
+        });
+    </script>
+</body>
+</html>
