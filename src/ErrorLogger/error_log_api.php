@@ -4,18 +4,19 @@
  * Handles server-side filtering, sorting, and pagination for Tabulator.js
  */
 
+use Ocallit\Sqler\QueryBuilder;
+use Ocallit\Sqler\SqlUtils;
+
 // Include config for authentication, security, and database connection
 require_once '../config/config.php';
 
-// Import required Sqler classes
-use Ocallit\Sqler\QueryBuilder;
-use Ocallit\Sqler\SqlUtils;
 
 // Set JSON response headers
 header('Content-Type: application/json');
 header('Cache-Control: no-cache, must-revalidate');
 
 // Initialize QueryBuilder for safe query construction
+global $gSqlExecutor;
 $qb = new QueryBuilder();
 
 try {

@@ -209,11 +209,21 @@ class SqlExecutor {
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
-     * @return bool|mysqli_result
+     * @return bool|array<int:array<string:mixed>>
      * @throws Exception
      */
-    public function query(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
-        return $this->runSql($query, $parameters);
+    public function query(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result {
+        $result = $this->runSql($query, $parameters);
+        if($result instanceof mysqli_result) {
+            try {
+                for($ret = []; $row = $result->fetch_array(MYSQLI_ASSOC);)
+                    $ret[] = $row;
+                return empty($ret) ? [] : $ret;
+            } finally {
+                $this->freeResult($result);
+            }
+        }
+        return $result;
     }
 
     /**

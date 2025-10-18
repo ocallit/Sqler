@@ -56,9 +56,9 @@ $PDEPEND_METRICS = [
 
   "eloc"      => ["label" => "Executable LOC", "desc" => "Executable lines of code", "min" => "", "max" => "", "decimals"=>0],
   "lloc"      => ["label" => "Logical LOC", "desc" => "Logical statements", "min" => "", "max" => "", "decimals"=>0],
-  "cloc"      => ["label" => "Comment LOC", "desc" => "Lines containing comments", "min" => "", "max" => "", "decimals"=>0],
+  "cloc"      => ["label" => "Comment LOC", "desc" => "Lines containing comment", "min" => "", "max" => "", "decimals"=>0],
   "loc"       => ["label" => "Lines of Code (LOC)", "desc" => "Total lines of code", "min" => "", "max" => "250", "decimals"=>0],
-  "ncloc"     => ["label" => "Non-Comment LOC", "desc" => "LOC minus comments", "min" => "", "max" => "", "decimals"=>0],
+  "ncloc"     => ["label" => "Non-Comment LOC", "desc" => "LOC minus comment", "min" => "", "max" => "", "decimals"=>0],
   "start"     => ["label" => "Start Line", "desc" => "First line of the element", "min" => "", "max" => "", "decimals"=>0],
   "end"       => ["label" => "End Line", "desc" => "Last line of the element", "min" => "", "max" => "", "decimals"=>0],
 ];
