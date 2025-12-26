@@ -27,7 +27,7 @@ use function is_array;
  */
 class Historian {
     public static $SessionNickKey = 'nick';
-    protected array $ingoreDifferenceForFields = [
+    protected array $ignoreDifferenceForFields = [
       'ultimo_cambio', 'ultimo_cambio_por',
       'last_changed', 'last_changed_by',
       'last_change', 'last_change_by'
@@ -50,11 +50,11 @@ class Historian {
             $this->primaryKeys = $primaryKeyFieldNames;
         else
             $this->primaryKeys = [$table . '_id'];
-        $this->ingoreDifferenceForFields = array_merge($this->ingoreDifferenceForFields, $ingoreDifferenceForFields);
+        $this->ignoreDifferenceForFields = array_merge($this->ignoreDifferenceForFields, $ingoreDifferenceForFields);
     }
 
-    public function setIngoreDifferenceForFields(array $ingoreDifferenceForFields): void {
-        $this->ingoreDifferenceForFields = $ingoreDifferenceForFields;
+    public function setIgnoreDifferenceForFields(array $ignoreDifferenceForFields): void {
+        $this->ignoreDifferenceForFields = $ignoreDifferenceForFields;
     }
 
     /**
@@ -185,7 +185,7 @@ class Historian {
         $diff = [];
         $keysToCheck = array_diff(
           array_merge(array_keys($before), array_keys($after)),
-    $this->ingoreDifferenceForFields
+    $this->ignoreDifferenceForFields
         );
         foreach($keysToCheck as $key) {
             $beforeValue = $before[$key] ?? null;
@@ -208,7 +208,7 @@ class Historian {
                 $differ = [];
             } else {
                 $differ = $this->differ($recordHistory[$i-1]['record'], $historyRecord['record']);
-                if(!empty($differ))
+                if(empty($differ))
                     continue;
             }
             $diff[$i] = [

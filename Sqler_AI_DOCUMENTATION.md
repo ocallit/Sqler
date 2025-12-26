@@ -292,7 +292,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 **Returns**: HTML table representation of changes
 **Purpose**: Format change history for display
 
-#### `setIngoreDifferenceForFields(array $ingoreDifferenceForFields): void`
+#### `setIgnoreDifferenceForFields(array $ingoreDifferenceForFields): void`
 **Purpose**: Update fields to ignore in change detection
 
 ---

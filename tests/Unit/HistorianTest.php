@@ -22,7 +22,7 @@ class HistorianTest extends TestCase {
 
     #[DataProvider('setIngoreDifferenceForFieldsProvider')]
     public function testSetIngoreDifferenceForFields(array $fields): void {
-        $this->historian->setIngoreDifferenceForFields($fields);
+        $this->historian->setIgnoreDifferenceForFields($fields);
 
         // Since the property is protected, we can test this indirectly
         // by checking that the method doesn't throw any errors

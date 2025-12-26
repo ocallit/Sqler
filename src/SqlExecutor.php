@@ -428,6 +428,71 @@ class SqlExecutor {
     }
 
     /**
+     * Multi-dimensional array using all but last TWO columns as keys,
+     * next-to-last column as key, last column as value in an array
+     *
+     * Example with result set:
+     * Row 1: ['A', 'B', 'key1', 'value1']
+     * Row 2: ['A', 'B', 'key1', 'value2']
+     * Row 3: ['A', 'B', 'key2', 'value3']
+     *
+     * Result:
+     * [
+     *   'A' => [
+     *     'B' => [
+     *       'key1' => ['value1', 'value2'],
+     *       'key2' => ['value3']
+     *     ]
+     *   ]
+     * ]
+     *
+     * @param string|mysqli_stmt $query
+     * @param array $parameters
+     * @param array $default
+     * @return array Multi-dimensional array with last field values accumulated in arrays
+     * @throws Exception
+     */
+    public function multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
+        if(empty($query))
+            return $default;
+        try {
+            $result = $this->runSql($query, $parameters);
+            $numFields = $result->field_count;
+
+            if($numFields < 2) {
+                throw new Exception("Query must return at least 2 columns for multiKeyValue");
+            }
+
+            $keyedFields = $numFields - 2;  // All but last two columns
+            $ret = [];
+
+            while($tmp = $result->fetch_array(MYSQLI_NUM)) {
+                $r = &$ret;
+
+                // Navigate through the nested structure using all but last 2 fields
+                for($iField = 0; $iField < $keyedFields; ++$iField) {
+                    $key = $tmp[$iField];
+                    if(!array_key_exists($key, $r))
+                        $r[$key] = [];
+                    $r = &$r[$key];
+                }
+
+                // Next-to-last field is the final key
+                $finalKey = $tmp[$numFields - 2];
+                if(!array_key_exists($finalKey, $r))
+                    $r[$finalKey] = [];
+
+                // Last field is accumulated as value
+                $r[$finalKey][] = $tmp[$numFields - 1];
+            }
+
+            return empty($ret) ? $default : $ret;
+        } finally {
+            $this->freeResult($result ?? false);
+        }
+    }
+
+    /**
      * return [[row1.col1 => row1.col2], [row2.col1 => row2.col2], ...] a key => value array, $default on not found
      *
      * @param string|mysqli_stmt $query
@@ -522,9 +587,10 @@ class SqlExecutor {
      */
     public function commit($comment = ''): bool {
         try {
+            if($this->openTransactions > 0)
+                $this->openTransactions--;
             $result = $this->runSql("COMMIT /*$comment*/");
             if($result !== false && $this->openTransactions > 0) {
-                $this->openTransactions--;
                 return true;
             }
             return false;
@@ -538,9 +604,11 @@ class SqlExecutor {
      */
     public function rollback($comment = ''): bool {
         try {
+            if($this->openTransactions > 0)
+                $this->openTransactions--;
             $result = $this->runSql("ROLLBACK /*$comment*/");
             if($result !== false && $this->openTransactions > 0) {
-                $this->openTransactions--;
+
                 return true;
             }
             return false;
