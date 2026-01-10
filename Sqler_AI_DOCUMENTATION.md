@@ -1,6 +1,6 @@
 # Sqler Repository Documentation
 
-**Claude's Internal Reference Guide for Database Access Classes**
+** AI Assistant's Internal Reference   Guide for Database Access Classes **
 
 This documentation serves as my reference guide for the Ocallit\Sqler PHP classes, enabling me to help write database access code effectively.
 
@@ -17,7 +17,7 @@ The repository provides a complete MySQL database access layer with:
 
 ## 1. SqlExecutor Class
 
-**Claude Note**: The SqlExecutor class has comprehensive error handling, retry logic, and logging. All public methods have specific return types and error handling patterns documented below.
+**IA Note**: The SqlExecutor class has comprehensive error handling, retry logic, and logging. All public methods have specific return types and error handling patterns documented below.
 
 ### Purpose
 Core database execution class providing MySQLi wrapper with automatic retry on locks/disconnections, comprehensive error handling, and query logging.
@@ -78,12 +78,32 @@ __construct(array $connect, array $connect_options = [], string $charset = 'utf8
 
 #### `multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array`
 **Returns**: Multi-dimensional array keyed by specified columns
+**Purpose**: Recursively groups data by specific named columns. The leaf node is the full row
 **Shape**: Nested array structure based on key columns
 **Use**: Complex hierarchical data organization
+**Example**: $result = $sql->multiKey($query, ['dept', 'role']); // Group by 'dept', then by 'role'
+**Query Result**: [['dept'=>'IT', 'role'=>'Admin', 'name'=>'John'], ['dept'=>'IT', 'role'=>'User', 'name'=>'Bob']] Keys: ['dept', 'role']
+**Returned Structure**: [ 'IT' => [ 'Admin' => ['dept' => 'IT', 'role' => 'Admin', 'name' => 'John'] ] ]
+
+#### multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array
+**Returns**: Multi-dimensional tree array keyed by the first $numFields columns.
+**Purpose**: Similar to multiKey, but keys are determined by the column order in the SELECT statement rather than named keys.
+**Sample Call**: $result = $sql->multiKeyN($query, 2); // Group by the first 2 columns (e.g., region, city)
+**Row**:['North', 'Chicago', 101, 500.00]
+**Structure**:[ 'North' => [ 'Chicago' => ['region' => 'North', 'city' => 'Chicago', 'store_id' => 101, 'total' => 500.00] ] ]
 
 #### `multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array`
 **Returns**: Multi-dimensional array using all but last column as keys, last column as values
 **Use**: Creating nested structures from flat query results
+**Row**: ['Category', 'SubCategory', 'Value']
+**Structure**:[ 'Category' => [ 'SubCategory' => 'Value' ] ]
+
+#### `multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array`
+**Returns: Multi-dimensional array. Uses all but the last 2 columns as path keys. The next-to-last column becomes the final key, and the last column is accumulated into a list (array) of values.
+**Sample Call: $result = $sql->multiKeyValue($query);
+**Rows**: ['A', 'key1', 'val1'] ['A', 'key1', 'val2']
+**Structure**: [ 'A' => [ 'key1' => ['val1', 'val2'] ] ]
+
 
 #### `result(string|mysqli_stmt $query, array $parameters = []): mysqli_result|bool`
 **Returns**: Raw mysqli_result object (caller must free)
@@ -145,7 +165,7 @@ __construct(array $connect, array $connect_options = [], string $charset = 'utf8
 
 ## 2. QueryBuilder Class
 
-**Claude Note**: QueryBuilder creates parameterized queries with proper escaping. All methods return arrays with 'query' and 'parameters' keys.
+**IA Note**: QueryBuilder creates parameterized queries with proper escaping. All methods return arrays with 'query' and 'parameters' keys.
 
 ### Purpose
 Builds parameterized SQL queries (INSERT, UPDATE, WHERE clauses) with proper field escaping and parameter binding.
@@ -198,7 +218,7 @@ __construct(bool $useNewOnDuplicate = true)
 
 ## 3. DatabaseMetadata Class (Singleton)
 
-**Claude Note**: DatabaseMetadata is a singleton that must be initialized with SqlExecutor. All public methods provide database introspection capabilities.
+**IA Note**: DatabaseMetadata is a singleton that must be initialized with SqlExecutor. All public methods provide database introspection capabilities.
 
 ### Purpose
 Provides database schema information, table structure, and query result metadata.
@@ -244,7 +264,7 @@ DatabaseMetadata::getInstance(): static
 
 ## 4. Historian Class (Audit System)
 
-**Claude Note**: Historian provides complete audit trail functionality. All public methods handle change tracking and history retrieval.
+**IA Note**: Historian provides complete audit trail functionality. All public methods handle change tracking and history retrieval.
 
 ### Purpose
 Tracks and stores audit trails of record changes (insert, update, delete) with user attribution and change analysis.
@@ -261,7 +281,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 
 ### Methods
 
-#### `register(string $action, array $pk, array $values, string $user_nick = '', string $motive = ''): void`
+#### `register(string $action, array $primaryKeys, array $values, string $user_nick = '', string $motive = ''): void`
 **Purpose**: Record a change to the audit trail with complete record state
 **Parameters:**
 - `$action`: 'insert', 'update', or 'delete'
@@ -299,7 +319,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 
 ## 5. SqlUtils Class
 
-**Claude Note**: SqlUtils provides static utility methods for SQL operations. All methods are pure functions.
+**IA Note**: SqlUtils provides static utility methods for SQL operations. All methods are pure functions.
 
 ### Purpose
 Static utility methods for SQL string handling and formatting.

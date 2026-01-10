@@ -153,7 +153,15 @@ class SqlExecutor {
     protected array $log = [];
     protected array $logError = [];
 
-    protected int $openTransactions = 0;
+    /**
+     * Physical transaction state.
+     * Indicates if the connection is effectively inside a transaction from the DB's perspective.
+     * Used strictly to prevent unsafe retries of failed queries.
+     *
+     * @var bool
+     */
+    protected bool $insideTransaction = false;
+
 
     /**
      *
@@ -569,14 +577,16 @@ class SqlExecutor {
         throw $lastError ?? new mysqli_sql_exception("Transaction failed after $attempts attempts");
     }
 
+    /**
+     * As per MySQL behavior, calling begin() while a transaction is open will IMPLICITLY COMMIT the previous transaction and start a new one.
+     * @param string $comment
+     * @return bool
+     */
     public function begin($comment = ''): bool {
         try {
-            $result = $this->runSql("START TRANSACTION /*$comment*/");
-            if($result !== false) {
-                $this->openTransactions++;
-                return true;
-            }
-            return false;
+             $result = $this->runSql("START TRANSACTION /*$comment*/");
+             $this->insideTransaction = true;
+             return $result;
         } finally { $this->freeResult($result ?? false); }
     }
 
@@ -587,13 +597,8 @@ class SqlExecutor {
      */
     public function commit($comment = ''): bool {
         try {
-            if($this->openTransactions > 0)
-                $this->openTransactions--;
-            $result = $this->runSql("COMMIT /*$comment*/");
-            if($result !== false && $this->openTransactions > 0) {
-                return true;
-            }
-            return false;
+            $this->insideTransaction = false;
+            return $this->runSql("COMMIT /*$comment*/");
         } finally { $this->freeResult($result ?? false); }
     }
 
@@ -604,11 +609,9 @@ class SqlExecutor {
      */
     public function rollback($comment = ''): bool {
         try {
-            if($this->openTransactions > 0)
-                $this->openTransactions--;
+            $this->insideTransaction = false;
             $result = $this->runSql("ROLLBACK /*$comment*/");
-            if($result !== false && $this->openTransactions > 0) {
-
+            if($result !== false) {
                 return true;
             }
             return false;
@@ -715,12 +718,12 @@ class SqlExecutor {
     public function getErrorLog(): array {return $this->logError;}
 
     /**
-     * Closes the current connection
+     * Closes the current connection $this->insideTransaction;
      */
     public function closeConnection(): void {
         if($this->mysqli instanceof mysqli) {
             try {
-                if($this->openTransactions > 0) {
+                if($this->insideTransaction) {
                     try {
                         $this->logErrorAdd(
                           0,
@@ -804,7 +807,7 @@ class SqlExecutor {
      * @throws Exception
      */
     protected function retryQuery(int $errorNumber):bool {
-        if($this->openTransactions > 0)
+        if($this->insideTransaction)
             return false;
         if(array_key_exists($errorNumber, $this->reconnectOnErrors))
             $this->connect();
