@@ -44,8 +44,8 @@ class QueryBuilder {
      * @return array
      */
     public function insert($table, $array,
-           bool $onDuplicateKeyUpdate = false, $onDuplicateKeyDontUpdate = [], $onDuplicateKeyOverride = [],
-           $comment = ''
+           bool $onDuplicateKeyUpdate = false, array $onDuplicateKeyDontUpdate = [],array $onDuplicateKeyOverride = [],
+           string $comment = ''
     ):array {
         $columns = [];
         $values = [];

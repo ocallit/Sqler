@@ -3,13 +3,12 @@
 
 namespace Ocallit\Sqler;
 
-use Exception;
 use mysqli;
 use mysqli_result;
 use mysqli_sql_exception;
 use mysqli_stmt;
 use SensitiveParameter;
-use \Throwable;
+use Throwable;
 use function array_key_exists;
 use function array_merge;
 use function implode;
@@ -189,7 +188,7 @@ class SqlExecutor {
 
     /**
      * @return void
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     protected function connect():void {
         $this->mysqli = new mysqli();
@@ -218,7 +217,7 @@ class SqlExecutor {
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @return bool|array<int:array<string:mixed>>
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function query(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result {
         $result = $this->runSql($query, $parameters);
@@ -251,7 +250,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param string|null|bool $default
      * @return string|null|bool
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function firstValue(string|mysqli_stmt $query, array $parameters = [], string|null|bool $default = ""):string|null|bool {
         if(empty($query))
@@ -271,7 +270,7 @@ class SqlExecutor {
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
@@ -292,7 +291,7 @@ class SqlExecutor {
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function arrayKeyed(string|mysqli_stmt $query, string $key, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
@@ -313,7 +312,7 @@ class SqlExecutor {
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         if(empty($query))
@@ -334,7 +333,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array {
         if(empty($query))
@@ -363,7 +362,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array {
         if(empty($query))
@@ -410,7 +409,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array Multi-dimensional array using all but last column as keys, last column as values
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
        if(empty($query))
@@ -458,7 +457,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array Multi-dimensional array with last field values accumulated in arrays
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
         if(empty($query))
@@ -468,7 +467,7 @@ class SqlExecutor {
             $numFields = $result->field_count;
 
             if($numFields < 2) {
-                throw new Exception("Query must return at least 2 columns for multiKeyValue");
+                throw new mysqli_sql_exception("Query must return at least 2 columns for multiKeyValue");
             }
 
             $keyedFields = $numFields - 2;  // All but last two columns
@@ -507,7 +506,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function keyValue(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         if(empty($query))
@@ -527,7 +526,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @return array
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function vector(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         if(empty($query))
@@ -546,7 +545,7 @@ class SqlExecutor {
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @return mysqli_result|bool
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     public function result(string|mysqli_stmt $query, array $parameters = []): mysqli_result|bool {
         if(empty($query))
@@ -557,18 +556,23 @@ class SqlExecutor {
     /**
      * @param array $queries
      * @param string|int $comment
+     * @param bool $consistentSnapshot
+     * @param bool $readOnly
      * @return void
-     * @throws Exception mysqli_sql_exception
+     * @throws mysqli_sql_exception
      */
-    public function transaction(array $queries, string|int $comment = ''):void {
+    public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
         $attempts = 0;
+        /** @var mysqli_sql_exception|null $astError */
+        $lastError = null;
         while(++$attempts <= $this->retries) {
             try {
-                    $this->begin($comment);
+                    $this->begin($comment, $consistentSnapshot, $readOnly);
                     foreach($queries as $query)
                         $this->query($query);
                     $this->commit($comment);
-            } catch (mysqli_sql_exception $e) {
+                    return;
+            } catch(mysqli_sql_exception $e) {
                 $lastError = $e;
                 $this->rollback($comment);
             }
@@ -584,7 +588,7 @@ class SqlExecutor {
      * @param bool $consistentSnapshot
      * @param bool $readOnly
      * @return void
-     * @throws Throwable usually mysqli_sql_exception
+     * @throws mysqli_sql_exception
      */
     public function begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void {
         $result = true;
@@ -596,7 +600,7 @@ class SqlExecutor {
                 $modes[] =  "READ ONLY";
             $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
             $this->insideTransaction = true;
-        } catch (Throwable $e) {
+        } catch (mysqli_sql_exception $e) {
             $this->insideTransaction = false;
             throw $e;
         } finally {
@@ -649,7 +653,7 @@ class SqlExecutor {
         try {
             if(!$this->mysqli) return 0;
             return $this->mysqli->errno ?? 0;
-        } catch(Exception $e) {return 0;}
+        } catch(Throwable $e) {return 0;}
     }
 
     /**
@@ -780,18 +784,20 @@ class SqlExecutor {
     }
 
     /**
-     * @param  string|mysqli_stmt $query
+     * @param string|mysqli_stmt $query
      * @param array $parameters
      * @return bool|mysqli_result
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     protected function runSql(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
         if(empty($this->mysqli))
             $this->connect();
         $this->logAdd($query, $parameters);
+        /** @var mysqli_sql_exception $lastError */
         $lastError = null;
         $attempts = 0;
         while(++$attempts <= $this->retries) {
+            $lastError = null;
             try {
                 if(is_string($query)) {
                     if(empty($parameters))
@@ -810,7 +816,7 @@ class SqlExecutor {
                 usleep($this->retrySleep);
             }
         }
-        throw $lastError === null ? new Exception("Unknown Error") : $lastError;
+        throw $lastError === null ? new mysqli_sql_exception("Unknown Error") : $lastError;
     }
 
     protected function freeResult(mysqli_result|bool $result): void {
@@ -825,7 +831,7 @@ class SqlExecutor {
     /**
      * @param int $errorNumber
      * @return bool
-     * @throws Exception
+     * @throws mysqli_sql_exception
      */
     protected function retryQuery(int $errorNumber):bool {
         if($this->insideTransaction)

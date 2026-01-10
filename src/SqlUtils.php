@@ -22,7 +22,7 @@ class SqlUtils {
     }
 
     /**
-     * Protect with ` backticks a: column name to column name respecting . table.column to table.column
+     * Protect with ` backticks a: column name to column name respecting . table.column to `table`.`column`
      *
      * @pure
      * @param string $fieldName

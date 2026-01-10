@@ -26,7 +26,7 @@ use function is_array;
  *   $lastChange = $history->getLastChange($primaryKeyValues);
  */
 class Historian {
-    public static $SessionNickKey = 'nick';
+    public static string $SessionNickKey = 'nick';
     protected array $ignoreDifferenceForFields = [
       'ultimo_cambio', 'ultimo_cambio_por',
       'last_changed', 'last_changed_by',
@@ -155,7 +155,7 @@ class Historian {
 
     /**
      * @param array $changes
-     * @return string HTML table representing the changes history.
+     * @return string HTML table representing the change's history.
      */
     public function changesAsHTML(array $changes): string {
         $html = '<table class="laTabla">' . '<tbody>';
