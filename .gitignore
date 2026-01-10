@@ -3,5 +3,7 @@
 .qdo
 vendor
 build
-
+.phpunit
+.phpunit.result.cache
+composer.lock
 

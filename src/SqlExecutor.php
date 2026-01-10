@@ -9,7 +9,7 @@ use mysqli_result;
 use mysqli_sql_exception;
 use mysqli_stmt;
 use SensitiveParameter;
-use Throwable;
+use \Throwable;
 use function array_key_exists;
 use function array_merge;
 use function implode;
@@ -558,17 +558,16 @@ class SqlExecutor {
      * @param array $queries
      * @param string|int $comment
      * @return void
-     * @throws Exception
+     * @throws Exception mysqli_sql_exception
      */
     public function transaction(array $queries, string|int $comment = ''):void {
         $attempts = 0;
         while(++$attempts <= $this->retries) {
             try {
-                if($this->begin($comment)) {
+                    $this->begin($comment);
                     foreach($queries as $query)
                         $this->query($query);
                     $this->commit($comment);
-                }
             } catch (mysqli_sql_exception $e) {
                 $lastError = $e;
                 $this->rollback($comment);
@@ -578,44 +577,66 @@ class SqlExecutor {
     }
 
     /**
-     * As per MySQL behavior, calling begin() while a transaction is open will IMPLICITLY COMMIT the previous transaction and start a new one.
-     * @param string $comment
-     * @return bool
+     * Start a new transaction
+     * Per MySQL behavior, calling begin() while a transaction is open will IMPLICITLY COMMIT the previous transaction and start a new one.
+     *
+     * @param string|int $comment
+     * @param bool $consistentSnapshot
+     * @param bool $readOnly
+     * @return void
+     * @throws Throwable usually mysqli_sql_exception
      */
-    public function begin($comment = ''): bool {
+    public function begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void {
+        $result = true;
         try {
-             $result = $this->runSql("START TRANSACTION /*$comment*/");
-             $this->insideTransaction = true;
-             return $result;
-        } finally { $this->freeResult($result ?? false); }
+            $modes = [];
+            if ($consistentSnapshot)
+                $modes[] = "WITH CONSISTENT SNAPSHOT";
+            if ($readOnly)
+                $modes[] =  "READ ONLY";
+            $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
+            $this->insideTransaction = true;
+        } catch (Throwable $e) {
+            $this->insideTransaction = false;
+            throw $e;
+        } finally {
+            $this->freeResult($result);
+        }
     }
 
     /**
      * Commit current transaction.
      *
+     * @param string|int $comment
+     * @return void
      * @throws mysqli_sql_exception
      */
-    public function commit($comment = ''): bool {
+    public function commit(string|int $comment = ''): void {
+        $result = true;
         try {
+            $result = $this->runSql("COMMIT /*$comment*/");
+        } finally {
+            // State reset happens regardless of exception
             $this->insideTransaction = false;
-            return $this->runSql("COMMIT /*$comment*/");
-        } finally { $this->freeResult($result ?? false); }
+            $this->freeResult($result);
+        }
     }
 
     /**
      * Rollback current transaction.
      *
-     * @throws mysqli_sql_exception
+     * @param string|int $comment
+     * @return void
+     * @throws mysqli_sql_exception If the rollback fails.
      */
-    public function rollback($comment = ''): bool {
+    public function rollback(string|int $comment = ''): void {
+        $result = false;
         try {
-            $this->insideTransaction = false;
             $result = $this->runSql("ROLLBACK /*$comment*/");
-            if($result !== false) {
-                return true;
-            }
-            return false;
-        } finally { $this->freeResult($result ?? false); }
+        } finally {
+            $this->insideTransaction = false;
+            $this->freeResult($result);
+        }
     }
 
     /**

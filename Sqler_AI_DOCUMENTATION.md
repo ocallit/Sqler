@@ -7,11 +7,39 @@ This documentation serves as my reference guide for the Ocallit\Sqler PHP classe
 ## Overview
 
 The repository provides a complete MySQL database access layer with:
-- **SqlExecutor**: Core database executor with error handling and retry logic
-- **QueryBuilder**: SQL query construction helper
-- **DatabaseMetadata**: Database introspection and metadata retrieval
-- **Historian**: Audit trail system for tracking record changes
-- **SqlUtils**: Utility functions for SQL operations
+
+## Sqler Package Quick Reference
+
+- ### SqlExecutor ([API](#1-sqlexecutor-class))
+  Core database executor with error handling and retry logic
+
+   - **Benefit**: Robust execution with automatic retries on deadlocks/timeouts and specialized result formatting (vectors, maps, trees).
+  
+   - **Key Use**: Running raw SQL, managing transactions, and handling connection stability.
+
+- ### QueryBuilder ([API](#2-querybuilder-class))
+  SQL query construction helper
+  - **Benefit**: Generates safe, parameterized SQL while intelligently handling MySQL functions (e.g., NOW()) and ON DUPLICATE logic.
+
+  - **Key Use**: Constructing INSERT, UPDATE, and WHERE clauses from arrays without manual parameter binding.
+
+- ### Historian ([API](#4-historian-class-audit-system))
+  Audit trail system for tracking record changes
+  - **Benefit**: distinct change tracking that calculates JSON diffs between record versions.
+
+  - **Key Use**: creating a "blame" or history view for specific database rows.
+
+- ### DatabaseMetadata ([API](#3-databasemetadata-class-singleton))
+  Database introspection and metadata retrieval
+  - **Benefit**: Singleton access to schema details, facilitating dynamic UI generation or ORM-like mapping.
+
+  - **Key Use**: Retrieving primary keys, foreign key constraints, and column types.
+
+- ### SqlUtils ([API](#5-sqlutils-class))
+  Utility functions for SQL operations
+  - **Benefit**: Pure utility functions for string safety and SQL formatting.
+
+  - **Key Use**: Escaping field names (fieldIt) and formatting labels.
 
 ---
 
@@ -167,6 +195,23 @@ __construct(array $connect, array $connect_options = [], string $charset = 'utf8
 
 **IA Note**: QueryBuilder creates parameterized queries with proper escaping. All methods return arrays with 'query' and 'parameters' keys.
 
+**IA Note**: ALWAYS use QueryBuilder for INSERT, UPDATE, and complex WHERE generation. It prevents quoting errors with MySQL functions and handles ON DUPLICATE syntax automatically.
+
+### Magic Function Handling
+
+The builder detects these strings in values and does NOT quote/parameterize them:
+
+ - NOW(), NOW(6)
+
+- CURDATE(), CURRENT_DATE, CURRENT_DATE()
+
+- CURRENT_TIMESTAMP, CURRENT_TIMESTAMP()
+
+- IA_UUID()
+
+- And others defined in $dontQuoteValue.
+
+
 ### Purpose
 Builds parameterized SQL queries (INSERT, UPDATE, WHERE clauses) with proper field escaping and parameter binding.
 
@@ -219,6 +264,7 @@ __construct(bool $useNewOnDuplicate = true)
 ## 3. DatabaseMetadata Class (Singleton)
 
 **IA Note**: DatabaseMetadata is a singleton that must be initialized with SqlExecutor. All public methods provide database introspection capabilities.
+**IA Note**: Must be initialized with DatabaseMetadata::initialize($sql) before use.
 
 ### Purpose
 Provides database schema information, table structure, and query result metadata.
@@ -265,6 +311,7 @@ DatabaseMetadata::getInstance(): static
 ## 4. Historian Class (Audit System)
 
 **IA Note**: Historian provides complete audit trail functionality. All public methods handle change tracking and history retrieval.
+**IA Note**: Used for tracking record lifecycles. It stores changes in a separate _hist table using JSON for the full record state.
 
 ### Purpose
 Tracks and stores audit trails of record changes (insert, update, delete) with user attribution and change analysis.
@@ -320,6 +367,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 ## 5. SqlUtils Class
 
 **IA Note**: SqlUtils provides static utility methods for SQL operations. All methods are pure functions.
+**IA Note**: Pure static helper functions.
 
 ### Purpose
 Static utility methods for SQL string handling and formatting.
@@ -451,3 +499,32 @@ $primaryKeys = $meta->primaryKeys();
 5. **Check error helper methods** after operations for specific error handling
 6. **Use transactions** for multi-query operations
 7. **Implement proper cleanup** with `closeConnection()` in finally blocks
+
+Usage Best Practices
+1. The "QueryBuilder First" Rule
+
+Incorrect (Manual Binding):
+```PHP
+
+$sql->query("INSERT INTO users (name, created) VALUES (?, NOW())", [$name]);
+```
+
+Correct (QueryBuilder):
+```PHP
+
+// Handles Magic 'NOW()' and parameterization automatically
+$q = $qb->insert('users', ['name' => $name, 'created' => 'NOW()']);
+$sql->query($q['query'], $q['parameters']);
+```
+2. Transaction Safety
+
+When using transaction(), do not wrap it in your own try/catch unless you intend to suppress the error. The method already retries 3 times before throwing.
+3. Historian Registration
+
+Always fetch the fresh row data to ensure the history log matches the database reality.
+```PHP
+$sql->query($updateParams['query'], $updateParams['parameters']);
+// Fetch the result strictly for history
+$freshRow = $sql->row("SELECT * FROM table WHERE id = ?", [$id]);
+$historian->register('update', ['id'=>$id], $freshRow, $user);
+```
