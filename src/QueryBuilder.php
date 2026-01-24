@@ -7,6 +7,19 @@ use function array_key_exists;
 use function implode;
 use function is_array;
 
+/**
+ * QueryBuilder Quick Reference:
+ *
+ * All methods return: ['query' => string, 'parameters' => array]
+ *
+ * - insert($table, $data, $onDupUpdate=false, $dontUpdate=[], $override=[], $comment='')
+ * - update($table, $data, $where=[], $comment='')
+ * - where($conditions, $conjunction='AND', $comment='')
+ *
+ * Magic values (not parameterized): NOW(), CURDATE(), CURRENT_TIMESTAMP, UUID(), etc.
+ * Where arrays: scalar → '=?', array → 'IN (?,...)'
+ * Auto-skipped on duplicate: alta_db, alta_por, registered, registered_by
+ */
 
 class QueryBuilder {
     public bool $useNewOnDuplicate = true; // Beginning with MySQL 8.0.19,

@@ -19,6 +19,19 @@ use function mysqli_connect_error;
 use function mysqli_connect_errno;
 use function usleep;
 
+/**
+ * SqlExecutor Quick Reference:
+ * - firstValue($q, $p): scalar
+ * - row($q, $p): [col => val]
+ * - array($q, $p): [[col => val], ...]
+ * - arrayKeyed($q, $key, $p): [keyVal => [col => val]]
+ * - vector($q, $p): [val1, val2, ...]
+ * - keyValue($q, $p): [key => val, ...]
+ * - multiKey($q, $keys, $p): nested by named keys
+ * - multiKeyN($q, $n, $p): nested by first N cols
+ * - multiKeyLast($q, $p): nested, last col as value
+ * - multiKeyValue($q, $p): nested, last col accumulated
+ */
 
 class SqlExecutor {
     protected mysqli|null $mysqli;

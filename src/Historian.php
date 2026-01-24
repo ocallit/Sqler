@@ -11,7 +11,26 @@ use function array_merge;
 use function count;
 use function implode;
 use function is_array;
-
+/**
+ * Historian Quick Reference (Audit Trail):
+ *
+ * Setup:
+ *   $hist = new Historian($sql, 'tablename', ['pk_col'], ['ignore_col1', ...])
+ *
+ * Recording (always pass fresh SELECT * row):
+ *   INSERT: insert → select → register('insert', $pk, $row, $user, $motive?)
+ *   UPDATE: update → select → register('update', $pk, $row, $user, $motive?)
+ *   DELETE: select → delete → register('delete', $pk, $row, $user, $motive?)
+ *
+ * Retrieval:
+ *   - getChanges($pk, $offset=0, $limit=100): array of {history_id, action, date, user_nick, diff, record}
+ *   - getNLastChanges($pk, $n=7): last N changes
+ *   - getLastChange($pk): last 2 changes
+ *   - changesAsHTML($changes): string
+ *
+ * Auto-ignored fields: ultimo_cambio, ultimo_cambio_por, last_changed, last_changed_by, last_change, last_change_by
+ * Creates {table}_hist automatically on first write.
+ */
 /**
  * Audit of changes to a record
  *
@@ -133,7 +152,7 @@ class Historian {
  * @throws Exception
      */
     public function getNLastChanges(array $primaryKeyValues, int $numEntries =  7 ):array {
-        return $this->getChanges($primaryKeyValues, '', "LIMIT $numEntries");
+        return $this->getChanges($primaryKeyValues, 0, "LIMIT $numEntries");
     }
 
     /**
@@ -198,27 +217,32 @@ class Historian {
         return $diff;
     }
 
-    protected function diff(array $recordHistory):array {
-        if(count($recordHistory) < 2)
+    protected function diff(array $recordHistory): array {
+        $records = array_values($recordHistory);  // Reindex for sequential access
+        $count = count($records);
+        if($count < 2)
             return [];
+
         $diff = [];
-        for($i = 0, $len = count($recordHistory) -1; $i < $len; ++$i) {
-            $historyRecord = $recordHistory[$i];
-            if($i === 0) {
-                $differ = [];
-            } else {
-                $differ = $this->differ($recordHistory[$i-1]['record'], $historyRecord['record']);
-                if(empty($differ))
-                    continue;
-            }
-            $diff[$i] = [
-                'history_id' => $historyRecord['history_id'],
-                'action' => $historyRecord['action'],
-                'motive' => $historyRecord['motive'],
-                'date' => $historyRecord['date'],
-                'user_nick' => $historyRecord['user_nick'],
-                'diff' => $differ,
-                'record' => $historyRecord['record'],
+        for($i = 0; $i < $count; ++$i) {
+            $current = $records[$i];
+            $older = $records[$i + 1] ?? null;
+
+            $differ = ($older !== null)
+              ? $this->differ($older['record'], $current['record'])
+              : [];
+
+            if(empty($differ))
+                continue;
+
+            $diff[] = [
+              'history_id' => $current['history_id'],
+              'action' => $current['action'],
+              'motive' => $current['motive'],
+              'date' => $current['date'],
+              'user_nick' => $current['user_nick'],
+              'diff' => $differ,
+              'record' => $current['record'],
             ];
         }
         return $diff;
