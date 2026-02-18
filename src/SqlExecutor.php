@@ -3,6 +3,7 @@
 
 namespace Ocallit\Sqler;
 
+
 use mysqli;
 use mysqli_result;
 use mysqli_sql_exception;
@@ -36,7 +37,7 @@ use function usleep;
 class SqlExecutor {
     protected mysqli|null $mysqli;
     protected string $charset = 'utf8mb4';
-    protected string $coalition = 'utf8mb4_0900_ai_ci';
+    protected string $collation = 'utf8mb4_0900_ai_ci';
 
     /**
      * @var array{
@@ -181,7 +182,7 @@ class SqlExecutor {
      * @param array{hostname: ?string, username: ?string, password: ?string, database: ?string, port: ?string, socket: ?string, flags: int } $connect
      * @param array $connect_options default [MYSQLI_INIT_COMMAND => 'SET AUTOCOMMIT = 1']
      * @param string $charset default utf8mb4
-     * @param string $coalition default utf8mb4_0900_ai_ci
+     * @param string $collation default utf8mb4_0900_ai_ci
      * @param int $flags
      */
     public function __construct(
@@ -189,13 +190,13 @@ class SqlExecutor {
       array $connect,
         array $connect_options = [],
         string $charset = 'utf8',
-        string $coalition = 'utf8_unicode_ci',
+        string $collation = 'utf8_unicode_ci',
         int $flags = 0
     ) {
         $this->connect = array_merge($this->connect, $connect) ;
         $this->connectOptions = array_merge($this->connectOptions, $connect_options);
         $this->charset = $charset;
-        $this->coalition = $coalition;
+        $this->collation = $collation;
         $this->flags = $flags;
     }
 
@@ -216,8 +217,8 @@ class SqlExecutor {
               $this->connect['socket'], $this->connect['flags'])) {
                 $this->mysqli->set_charset($this->charset);
                 // $charset = SqlUtils::strIt($this->charset);
-                // $coalition = SqlUtils::strIt($this->coalition);
-                $this->query( "SET NAMES $this->charset COLLATE $this->coalition");
+                // $collation = SqlUtils::strIt($this->collation);
+                $this->query( "SET NAMES $this->charset COLLATE $this->collation");
                 return;
             }
         }
@@ -586,6 +587,7 @@ class SqlExecutor {
                     $this->commit($comment);
                     return;
             } catch(mysqli_sql_exception $e) {
+                /** @var mysqli_sql_exception $lastError */
                 $lastError = $e;
                 $this->rollback($comment);
             }
@@ -796,6 +798,22 @@ class SqlExecutor {
         }
     }
 
+    public function __destruct() {
+        try {
+            if($this->mysqli instanceof mysqli)
+                $this->mysqli->query("COMMIT");
+            $this->closeConnection();
+        } catch (Throwable $e) {
+            $this->logErrorAdd(
+              $e->getCode(),
+              "Error during connection close in destructor: " . $e->getMessage(),
+              "",
+              [],
+              0
+            );
+        }
+    }
+
     /**
      * @param string|mysqli_stmt $query
      * @param array $parameters
@@ -825,6 +843,7 @@ class SqlExecutor {
                 $this->logErrorAdd($error->getCode(), $error->getMessage(), $query, $parameters, $attempts);
                 if(!$this->retryQuery($error->getCode()))
                     throw $error;
+                /** @var mysqli_sql_exception $lastError */
                 $lastError = $error;
                 usleep($this->retrySleep);
             }

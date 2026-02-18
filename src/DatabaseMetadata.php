@@ -518,5 +518,4 @@ ORDER BY ORDINAL_POSITION", "name", [$tableName]
         ];
         return $types[$typeId] ?? 'unknown';
     }
-
 }
