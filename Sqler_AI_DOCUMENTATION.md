@@ -516,10 +516,10 @@ Correct (QueryBuilder):
 $q = $qb->insert('users', ['name' => $name, 'created' => 'NOW()']);
 $sql->query($q['query'], $q['parameters']);
 ```
-2. Transaction Safety
+1. Transaction Safety
 
 When using transaction(), do not wrap it in your own try/catch unless you intend to suppress the error. The method already retries 3 times before throwing.
-3. Historian Registration
+1. Historian Registration
 
 Always fetch the fresh row data to ensure the history log matches the database reality.
 ```PHP
