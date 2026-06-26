@@ -11,7 +11,7 @@ use Exception;
  *   $result = ValidatorSql::validate('orders', $data, $sqlExecutor);
  *   // $result['valid']    bool
  *   // $result['errors']   array<columnName, string[]>  — per-column error messages
- *   // $result['warnings'] string[]                     — column names absent from $data with no default
+ *   // $result['warnings'] array<string, string[]>       — column names absent from $data with no default
  *
  * Requirements:
  *   - DatabaseMetadata::initialize($sql) must have been called before first use.
@@ -33,7 +33,7 @@ class ValidatorSql {
      * @return array{
      *   valid: bool,
      *   errors: array<string, string[]>,
-     *   warnings: string[]
+     *   warnings: array<string, string[]>
      * }
      * @throws Exception
      */
@@ -52,7 +52,9 @@ class ValidatorSql {
         $uniqueIndexes  = $meta->uniqueIndexes($tableName, $database);
         $checkConstraints = $meta->getCheckConstraints($tableName, $database);
 
+        /** @var array<string, string[]> $errors */
         $errors   = [];
+        /** @var array<string, string[]> $warnings */
         $warnings = [];
 
         // 1. Primary key columns must be present in $data
@@ -76,7 +78,7 @@ class ValidatorSql {
             $isGenerated     = !empty($col['generation_expression']);
 
             if (!$hasDefault && !$isNullable && !$isAutoIncrement && !$isGenerated) {
-                $warnings[] = $colName;
+                $warnings[$colName][] = "Column '$colName' has no default value and is not present in data.";
             }
         }
 
