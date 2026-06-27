@@ -199,7 +199,7 @@ class DatabaseMetadata {
      * @throws Exception
      */
     public function primaryKeys(string $database = ""): array {
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(empty($this->primaryKeys[$dbName])) {
             $sql = "SELECT /*" . __METHOD__ . "*/ t.TABLE_NAME, c.COLUMN_NAME
                 FROM information_schema.TABLES t
@@ -219,7 +219,7 @@ class DatabaseMetadata {
      * @throws Exception
      */
     public function uniqueIndexes(string $tableName = "", string $database = ""): array {
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(empty($this->uniqueIndexes[$dbName])) {
             $method = __METHOD__;
             $sql = "SELECT /*$method*/ 
@@ -266,7 +266,7 @@ class DatabaseMetadata {
     public function table(string $tableName, string $database = ""): array {
         if(empty($tableName))
             return [];
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(!isset($this->tableColumns[$dbName][$tableName]))
             $this->tableColumns[$dbName][$tableName] = $this->sqlExecutor->arrayKeyed(
               "SELECT
@@ -370,7 +370,7 @@ class DatabaseMetadata {
         if(empty($tableName)) {
             return [];
         }
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
 
         if(!isset($this->foreignKeys[$dbName][$tableName])) {
             $sql = "SELECT /*" . __METHOD__ . "*/ 
@@ -408,7 +408,7 @@ class DatabaseMetadata {
     public function foreignKeyDeduce(string $tableName, string $database = ""): array {
         if(empty($tableName))
             return [];
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
 
         if(isset($this->deducedForeignKeys[$dbName][$tableName]))
             return $this->deducedForeignKeys[$dbName][$tableName];
@@ -469,7 +469,7 @@ class DatabaseMetadata {
      * @throws Exception
      */
     public function foreignKeyDeduceDDL(string $tableName, string $database = ""): array {
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(!isset($this->deducedForeignKeysDDL[$dbName][$tableName]))
             $this->foreignKeyDeduce($tableName, $database);
         return $this->deducedForeignKeysDDL[$dbName][$tableName] ?? [];
@@ -484,7 +484,7 @@ class DatabaseMetadata {
      */
     public function foreignKeysAll(string $database = ""): array {
         //@ToDo not cached!
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         $parents = [];
         $children = [];
         $foreignKeys = [];
@@ -556,7 +556,7 @@ class DatabaseMetadata {
         if(empty($tableName)) {
             return [];
         }
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::fieldIt($database);
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
 
         if(!isset($this->checkConstraints[$dbName][$tableName])) {
             $sql = "SELECT /*" . __METHOD__ . "*/ tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE

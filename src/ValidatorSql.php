@@ -138,7 +138,7 @@ class ValidatorSql {
             $pkExclusion = '';
             foreach ($primaryKeys as $pkCol) {
                 if (array_key_exists($pkCol, $data) && $data[$pkCol] !== null && $data[$pkCol] !== '') {
-                    $pkExclusion .= " AND " . SqlUtils::fieldIt($pkCol) . " != ?";
+                    $pkExclusion .= " AND " . SqlUtils::fieldIt($pkCol) . " = ?";
                     $params[]     = $data[$pkCol];
                 }
             }
@@ -146,7 +146,7 @@ class ValidatorSql {
             $tbl   = SqlUtils::fieldIt($tableName);
             $where = implode(' AND ', $whereParts);
 
-            $exists = $sql->firstValue("SELECT 1 FROM $tbl WHERE $where$pkExclusion LIMIT 1", $params);
+            $exists = $sql->firstValue("SELECT 1 FROM $tbl WHERE NOT ( $where$pkExclusion) LIMIT 1", $params);
             if ($exists) {
                 $colList = implode(', ', $cols);
                 foreach ($cols as $col) {

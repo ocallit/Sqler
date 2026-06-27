@@ -6,4 +6,5 @@ build
 .phpunit
 .phpunit.result.cache
 composer.lock
+.tmp
 
