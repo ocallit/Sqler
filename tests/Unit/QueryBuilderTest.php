@@ -271,4 +271,48 @@ class QueryBuilderTest extends TestCase {
           ],
         ];
     }
+
+    public function testSyncBridgeTableEmptyValuesReturnsEmptyArray(): void {
+        $this->assertSame([], $this->queryBuilder->syncBridgeTable('tableA_to_tableB', 'tableA_id', 'tableB_id', []));
+    }
+
+    public function testSyncBridgeTableReturnsDeleteThenInsertStatements(): void {
+        $result = $this->queryBuilder->syncBridgeTable('tableA_to_tableB', 'tableA_id', 'tableB_id', [
+          ['tableA_id' => 'a1', 'tableB_id' => 1, 'note' => 'x'],
+          ['tableA_id' => 'a1', 'tableB_id' => 2, 'note' => 'y'],
+        ]);
+
+        $this->assertCount(2, $result);
+        foreach($result as $statement) {
+            $this->assertArrayHasKey('query', $statement);
+            $this->assertArrayHasKey('parameters', $statement);
+            $this->assertIsString($statement['query']);
+            $this->assertIsArray($statement['parameters']);
+        }
+
+        [$delete, $insert] = $result;
+
+        $this->assertStringContainsString('DELETE', $delete['query']);
+        $this->assertStringContainsString('`tableA_to_tableB`', $delete['query']);
+        $this->assertStringContainsString('`tableA_id` IN (?)', $delete['query']);
+        $this->assertStringContainsString('(`tableA_id`,`tableB_id`) NOT IN ((?,?),(?,?))', $delete['query']);
+        $this->assertSame(['a1', 'a1', 1, 'a1', 2], $delete['parameters']);
+
+        $this->assertStringContainsString('INSERT', $insert['query']);
+        $this->assertStringContainsString('`tableA_to_tableB`', $insert['query']);
+        $this->assertStringContainsString('(`tableA_id`,`tableB_id`,`note`)', $insert['query']);
+        $this->assertStringContainsString('VALUES(?,?,?),(?,?,?)', $insert['query']);
+        $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $insert['query']);
+        $this->assertStringContainsString('`note`=new.`note`', $insert['query']);
+        $this->assertSame(['a1', 1, 'x', 'a1', 2, 'y'], $insert['parameters']);
+    }
+
+    public function testSyncBridgeTableUsesValuesSyntaxWhenNotUsingNewOnDuplicate(): void {
+        $queryBuilder = new QueryBuilder(false);
+        $result = $queryBuilder->syncBridgeTable('tableA_to_tableB', 'tableA_id', 'tableB_id', [
+          ['tableA_id' => 'a1', 'tableB_id' => 1],
+        ]);
+
+        $this->assertStringContainsString('`tableB_id`=VALUES(`tableB_id`)', $result[1]['query']);
+    }
 }

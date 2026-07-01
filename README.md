@@ -122,6 +122,15 @@ $where = $qb->where([
 ], 'AND');
 
 $sql->query($update['query'], $update['parameters']);
+
+// Sync a many-to-many bridge table: deletes stale relations, upserts the rest
+$statements = $qb->syncBridgeTable('users_to_roles', 'user_id', 'role_id', [
+    ['user_id' => 5, 'role_id' => 1, 'granted_by' => 'admin'],
+    ['user_id' => 5, 'role_id' => 3, 'granted_by' => 'admin'],
+]);
+foreach ($statements as $statement) {
+    $sql->query($statement['query'], $statement['parameters']);
+}
 ```
 
 ### DatabaseMetadata - Schema Introspection

@@ -259,6 +259,29 @@ __construct(bool $useNewOnDuplicate = true)
 - Timestamp: `CURRENT_TIMESTAMP()`, `LOCALTIMESTAMP()`, `UNIX_TIMESTAMP()`, `UTC_TIMESTAMP()`
 - UUID: `IA_UUID()`
 
+#### `syncBridgeTable(string $table, string $columnA, string $columnB, array $values, string $comment = ''): array`
+**Returns**: `[['query' => string, 'parameters' => array], ...]` — a DELETE statement followed by an INSERT ... ON DUPLICATE KEY UPDATE statement, or `[]` when `$values` is empty
+**Purpose**: Synchronize a many-to-many bridge/pivot table (e.g. `tableA_id, tableB_id[, extra columns...]` with a composite primary key on `(tableA_id, tableB_id)`) so it matches exactly the rows given in `$values`
+**Parameters:**
+- `$table`: Bridge table name
+- `$columnA`: Column holding tableA's id/key (e.g. `tableA_id`)
+- `$columnB`: Column holding tableB's id/key (e.g. `tableB_id`)
+- `$values`: `[ [$columnA=>value, $columnB=>value, otherColumn=>value, ...], ... ]` rows to keep/upsert. Every row must have the same set of columns, including `$columnA` and `$columnB`.
+  **Behavior:**
+- **Deletes stale relations**: For every tableA id present in `$values`, deletes existing rows whose `($columnA, $columnB)` pair is not in `$values` (relations for tableA ids not mentioned in `$values` are left untouched)
+- **Upserts the rest**: Inserts all rows from `$values` in a single multi-row `INSERT ... ON DUPLICATE KEY UPDATE`, so existing pairs get their extra columns updated and new pairs get inserted
+- **Execute in order**: Run the returned DELETE before the INSERT (ideally in a transaction) since the DELETE relies on the pre-update state
+**Example:**
+```php
+$statements = $qb->syncBridgeTable('users_to_roles', 'user_id', 'role_id', [
+    ['user_id' => 5, 'role_id' => 1, 'granted_by' => 'admin'],
+    ['user_id' => 5, 'role_id' => 3, 'granted_by' => 'admin'],
+]);
+foreach ($statements as $statement) {
+    $sql->query($statement['query'], $statement['parameters']);
+}
+```
+
 ---
 
 ## 3. DatabaseMetadata Class (Singleton)
