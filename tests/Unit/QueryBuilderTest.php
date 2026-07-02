@@ -269,6 +269,16 @@ class QueryBuilderTest extends TestCase {
               'parameters' => [],
             ],
           ],
+          'where_with_empty_in_matches_nothing' => [
+            ['id' => [], 'status' => 'active'],
+            'AND',
+            '',
+            [
+              'parameter_count' => 1,
+              'query_contains' => ['`id` IN (NULL)', 'AND', '`status`=?'],
+              'parameters' => ['active'],
+            ],
+          ],
         ];
     }
 

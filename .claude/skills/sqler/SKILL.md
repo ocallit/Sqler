@@ -1,3 +1,8 @@
+---
+name: sqler
+description: Write correct database code with the Ocallit\Sqler PHP library (SqlExecutor, QueryBuilder, DatabaseMetadata, Historian, ValidatorSql). Use when reading/writing MySQL data, building INSERT/UPDATE/WHERE queries, managing transactions, validating form data against a table schema, or recording audit trails in a project that uses Ocallit\Sqler.
+---
+
 # Skill: Ocallit\Sqler — PHP Database Interface
 
 When helping with PHP projects that use `Ocallit\Sqler`, use this skill to write
@@ -11,6 +16,7 @@ Ocallit\Sqler\SqlExecutor       — core query engine
 Ocallit\Sqler\QueryBuilder      — INSERT / UPDATE / WHERE builder
 Ocallit\Sqler\DatabaseMetadata  — schema introspection (singleton)
 Ocallit\Sqler\Historian         — audit trail / change history
+Ocallit\Sqler\ValidatorSql      — validate array data against table schema
 Ocallit\Sqler\SqlUtils          — static escaping / label helpers
 ```
 
@@ -57,6 +63,8 @@ Choose the method that matches the shape you need:
 | `keyValue($q, $p)` | `[col1 => col2, ...]` | two-column key→value map |
 | `multiKey($q, $keys, $p)` | nested array | group by named columns |
 | `multiKeyN($q, $n, $p)` | nested array | group by first N SELECT cols |
+| `multiKeyLast($q, $p)` | nested array, last col accumulated in lists | pivot-style trees |
+| `multiKeyValue($q, $p)` | nested array, next-to-last col as key, last col in lists | grouped value lists |
 | `result($q, $p)` | `mysqli_result` | raw result (caller frees) |
 
 ```php
@@ -245,24 +253,28 @@ echo $historian->changesAsHTML($changes);
 
 ## 8. Error Detection
 
-After a failed query, use typed checks instead of parsing error messages:
+Failed queries **throw** (`mysqli_sql_exception`); catch first, then use typed
+checks instead of parsing error messages:
 
 ```php
-$sql->query("DELETE FROM customers WHERE customer_id = ?", [5]);
-
-if ($sql->is_last_error_child_records_exist()) {
-    // FK violation: child rows exist (1451)
-} elseif ($sql->is_last_error_duplicate_key()) {
-    // Unique/primary key conflict (1022, 1062)
-} elseif ($sql->is_last_error_invalid_foreign_key()) {
-    // FK target row missing (1216, 1452)
-} elseif ($sql->is_last_error_table_not_found()) {
-    // Table doesn't exist (1051, 1109, 1146)
-} elseif ($sql->is_last_error_column_not_found()) {
-    // Column doesn't exist (1054, 1063, 1166)
+try {
+    $sql->query("DELETE FROM customers WHERE customer_id = ?", [5]);
+} catch (mysqli_sql_exception $e) {
+    if ($sql->is_last_error_child_records_exist()) {
+        // FK violation: child rows exist (1451)
+    } elseif ($sql->is_last_error_duplicate_key()) {
+        // Unique/primary key conflict (1022, 1062)
+    } elseif ($sql->is_last_error_invalid_foreign_key()) {
+        // FK target row missing (1216, 1452)
+    } elseif ($sql->is_last_error_table_not_found()) {
+        // Table doesn't exist (1051, 1109, 1146)
+    } elseif ($sql->is_last_error_column_not_found()) {
+        // Column doesn't exist (1054, 1063, 1166)
+    } else {
+        throw $e;
+    }
+    $errNo = $sql->getLastErrorNumber();
 }
-
-$errNo = $sql->getLastErrorNumber();
 ```
 
 **Automatic retries** (transparent, no code needed):
@@ -298,6 +310,57 @@ SqlUtils::fieldIt('users.email')       // `users`.`email`
 SqlUtils::strIt("O'Brien")             // 'O''Brien'
 SqlUtils::toLabel('order_created_at')  // "Order Created At"
 ```
+
+---
+
+## 11. Junction Table Sync (n:m)
+
+Synchronize a junction table for one parent id without deleting the rows that
+stay: rows received are upserted, rows absent are deleted.
+
+```php
+$statements = $qb->junctionTable('user_to_role', 'user_id', 7, 'role_id', [
+    ['role_id' => 1],
+    ['role_id' => 2, 'granted_by' => 'admin'],   // extra columns updated on duplicate
+]);
+
+$sql->begin('sync roles');
+try {
+    foreach ($statements as $stmt)
+        $sql->query($stmt['query'], $stmt['parameters']);
+    $sql->commit('sync roles');
+} catch (Throwable $e) {
+    $sql->rollback('sync roles');
+    throw $e;
+}
+```
+
+- Returns a DELETE (`... WHERE user_id=? AND role_id NOT IN (...)`) followed by
+  one `INSERT ... ON DUPLICATE KEY UPDATE` per row — run them in one transaction.
+- An **empty** `$values` array deletes all rows for that parent id.
+
+---
+
+## 12. Validating Data Against the Schema (ValidatorSql)
+
+One static call checks types, lengths, ranges, ENUM/SET membership, NOT NULL,
+FK existence, unique collisions (excluding the current row by PK), and CHECK
+constraints. Requires `DatabaseMetadata::initialize($sql)` at startup.
+
+```php
+use Ocallit\Sqler\ValidatorSql;
+
+$result = ValidatorSql::validate('orders', $_POST, $sql);
+// $result['valid']    bool
+// $result['errors']   [column => [message, ...]]  — must fix
+// $result['warnings'] [column => [message, ...]]  — missing non-PK columns with no default
+
+if (!$result['valid']) { /* show $result['errors'] to the user */ }
+```
+
+- Primary key column(s) must be present in the data array (missing PK = error).
+- Unique-index checks are skipped when an indexed column is NULL (MySQL allows
+  multiple NULLs in unique indexes).
 
 ---
 

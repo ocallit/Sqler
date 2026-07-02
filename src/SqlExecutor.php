@@ -189,8 +189,8 @@ class SqlExecutor {
       #[SensitiveParameter]
       array $connect,
         array $connect_options = [],
-        string $charset = 'utf8',
-        string $collation = 'utf8_unicode_ci',
+        string $charset = 'utf8mb4',
+        string $collation = 'utf8mb4_0900_ai_ci',
         int $flags = 0
     ) {
         $this->connect = array_merge($this->connect, $connect) ;
@@ -205,35 +205,43 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     protected function connect():void {
-        $this->mysqli = new mysqli();
-        foreach($this->connectOptions as $option => $value)
-            if(!$this->mysqli->options($option, $value)) {
-                throw new mysqli_sql_exception("Setting $option $value failed");
-            }
+        // Under MYSQLI_REPORT_STRICT (PHP default) real_connect throws instead of returning false,
+        // so retries must catch the exception to happen at all.
+        $lastError = null;
         $attempts = 0;
         while(++$attempts <= $this->retries) {
-            if($this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
-              $this->connect['password'], $this->connect['database'], $this->connect['port'],
-              $this->connect['socket'], $this->connect['flags'])) {
-                $this->mysqli->set_charset($this->charset);
-                // $charset = SqlUtils::strIt($this->charset);
-                // $collation = SqlUtils::strIt($this->collation);
-                $this->query( "SET NAMES $this->charset COLLATE $this->collation");
-                return;
+            $this->mysqli = new mysqli();
+            foreach($this->connectOptions as $option => $value)
+                if(!$this->mysqli->options($option, $value)) {
+                    throw new mysqli_sql_exception("Setting $option $value failed");
+                }
+            try {
+                if($this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
+                  $this->connect['password'], $this->connect['database'], $this->connect['port'],
+                  $this->connect['socket'], $this->connect['flags'])) {
+                    $this->mysqli->set_charset($this->charset);
+                    $this->query( "SET NAMES $this->charset COLLATE $this->collation");
+                    return;
+                }
+            } catch(mysqli_sql_exception $e) {
+                $lastError = $e;
             }
+            if($attempts < $this->retries)
+                usleep($this->retrySleep * 1000);
         }
-        throw new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
+        throw $lastError ??
+          new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
     }
 
     /**
-     *
+     * Execute any query: SELECT-like queries return all rows, other statements return bool.
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
-     * @return bool|array<int:array<string:mixed>>
+     * @return bool|array<int, array<string, mixed>>
      * @throws mysqli_sql_exception
      */
-    public function query(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result {
+    public function query(string|mysqli_stmt $query, array $parameters = []): bool|array {
         $result = $this->runSql($query, $parameters);
         if($result instanceof mysqli_result) {
             try {
@@ -430,13 +438,14 @@ class SqlExecutor {
            return $default;
         try {
             $result = $this->runSql($query, $parameters);
-            $numFields = $result->field_count;
-            $keyedFields = $numFields - 1;
+            $keyedFields = null;
             for($ret = []; $tmp = $result->fetch_array(MYSQLI_NUM);) {
+                if($keyedFields === null)
+                    $keyedFields = count($tmp) - 1;
                 $r = &$ret;
                 for($iField = 0; $iField < $keyedFields; ++$iField) {
                     $key = $tmp[$iField];
-                    if(!array_key_exists($key, $ret))
+                    if(!array_key_exists($key, $r))
                         $r[$key] = [];
                     $r = &$r[$key];
                 }
@@ -478,16 +487,18 @@ class SqlExecutor {
             return $default;
         try {
             $result = $this->runSql($query, $parameters);
-            $numFields = $result->field_count;
-
-            if($numFields < 2) {
-                throw new mysqli_sql_exception("Query must return at least 2 columns for multiKeyValue");
-            }
-
-            $keyedFields = $numFields - 2;  // All but last two columns
+            $numFields = null;
+            $keyedFields = 0;
             $ret = [];
 
             while($tmp = $result->fetch_array(MYSQLI_NUM)) {
+                if($numFields === null) {
+                    $numFields = count($tmp);
+                    if($numFields < 2) {
+                        throw new mysqli_sql_exception("Query must return at least 2 columns for multiKeyValue");
+                    }
+                    $keyedFields = $numFields - 2;  // All but last two columns
+                }
                 $r = &$ret;
 
                 // Navigate through the nested structure using all but last 2 fields
@@ -577,7 +588,7 @@ class SqlExecutor {
      */
     public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
         $attempts = 0;
-        /** @var mysqli_sql_exception|null $astError */
+        /** @var mysqli_sql_exception|null $lastError */
         $lastError = null;
         while(++$attempts <= $this->retries) {
             try {
@@ -587,9 +598,12 @@ class SqlExecutor {
                     $this->commit($comment);
                     return;
             } catch(mysqli_sql_exception $e) {
-                /** @var mysqli_sql_exception $lastError */
                 $lastError = $e;
-                $this->rollback($comment);
+                try {
+                    $this->rollback($comment);
+                } catch(mysqli_sql_exception) {}
+                if(!array_key_exists($e->getCode(), $this->retryOnErrors))
+                    throw $e;
             }
         }
         throw $lastError ?? new mysqli_sql_exception("Transaction failed after $attempts attempts");
@@ -613,7 +627,7 @@ class SqlExecutor {
                 $modes[] = "WITH CONSISTENT SNAPSHOT";
             if ($readOnly)
                 $modes[] =  "READ ONLY";
-            $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
+            $result = $this->runSql("START TRANSACTION /*" . $this->commentIt($comment) . "*/ " . implode(", ", $modes));
             $this->insideTransaction = true;
         } catch (mysqli_sql_exception $e) {
             $this->insideTransaction = false;
@@ -633,7 +647,7 @@ class SqlExecutor {
     public function commit(string|int $comment = ''): void {
         $result = true;
         try {
-            $result = $this->runSql("COMMIT /*$comment*/");
+            $result = $this->runSql("COMMIT /*" . $this->commentIt($comment) . "*/");
         } finally {
             // State reset happens regardless of exception
             $this->insideTransaction = false;
@@ -651,7 +665,7 @@ class SqlExecutor {
     public function rollback(string|int $comment = ''): void {
         $result = false;
         try {
-            $result = $this->runSql("ROLLBACK /*$comment*/");
+            $result = $this->runSql("ROLLBACK /*" . $this->commentIt($comment) . "*/");
         } finally {
             $this->insideTransaction = false;
             $this->freeResult($result);
@@ -678,9 +692,7 @@ class SqlExecutor {
      * @return bool True if the last error was a table not found error
      */
     public function is_last_error_table_not_found(): bool {
-        if(!$this->mysqli) return false;
-
-        return in_array($this->mysqli->errno, [
+        return in_array($this->getLastErrorNumber(), [
           SqlExecutor::ERROR_TABLE_NOT_FOUND,
           SqlExecutor::ERROR_NO_SUCH_TABLE,
           SqlExecutor::ERROR_UNKNOWN_TABLE
@@ -694,9 +706,7 @@ class SqlExecutor {
      * @return bool True if the last error was a duplicate key error
      */
     public function is_last_error_duplicate_key(): bool {
-        if(!$this->mysqli) return false;
-
-        return in_array($this->mysqli->errno, [
+        return in_array($this->getLastErrorNumber(), [
           SqlExecutor::ERROR_UNIQUE_VIOLATION,
           SqlExecutor::ERROR_PRIMARY_KEY_VIOLATION
         ], true);
@@ -709,9 +719,7 @@ class SqlExecutor {
      * @return bool True if the last error was a foreign key violation
      */
     public function is_last_error_invalid_foreign_key(): bool {
-        if(!$this->mysqli) return false;
-
-        return in_array($this->mysqli->errno, [
+        return in_array($this->getLastErrorNumber(), [
           SqlExecutor::ERROR_FOREIGN_KEY_VIOLATION,
           SqlExecutor::ERROR_FOREIGN_KEY_PARENT_NOT_FOUND
         ], true);
@@ -724,9 +732,7 @@ class SqlExecutor {
      * @return bool True if the last error was due to existing child records
      */
     public function is_last_error_child_records_exist(): bool {
-        if(!$this->mysqli) return false;
-
-        return $this->mysqli->errno === SqlExecutor::ERROR_FOREIGN_KEY_CHILD_EXISTS;
+        return $this->getLastErrorNumber() === SqlExecutor::ERROR_FOREIGN_KEY_CHILD_EXISTS;
     }
     
     /**
@@ -736,9 +742,7 @@ class SqlExecutor {
      * @return bool True if the last error was a column not found error
      */
     public function is_last_error_column_not_found(): bool {
-        if(!$this->mysqli) return false;
-
-        return in_array($this->mysqli->errno, [
+        return in_array($this->getLastErrorNumber(), [
           SqlExecutor::ERROR_UNKNOWN_COLUMN,
           SqlExecutor::ERROR_BAD_FIELD,
           SqlExecutor::ERROR_WRONG_FIELD_SPEC
@@ -800,8 +804,8 @@ class SqlExecutor {
 
     public function __destruct() {
         try {
-            if($this->mysqli instanceof mysqli)
-                $this->mysqli->query("COMMIT");
+            // closeConnection() rolls back any transaction left open: an object destroyed
+            // mid-transaction (e.g. exception unwinding) must not commit partial work.
             $this->closeConnection();
         } catch (Throwable $e) {
             $this->logErrorAdd(
@@ -835,7 +839,7 @@ class SqlExecutor {
                         return $this->mysqli->query($query);
                     return $this->mysqli->execute_query($query, $parameters);
                 }
-                $query->execute();
+                $query->execute(empty($parameters) ? null : $parameters);
                 $result = $query->get_result();
                 $query->store_result();
                 return $result;
@@ -845,7 +849,7 @@ class SqlExecutor {
                     throw $error;
                 /** @var mysqli_sql_exception $lastError */
                 $lastError = $error;
-                usleep($this->retrySleep);
+                usleep($this->retrySleep * 1000);
             }
         }
         throw $lastError === null ? new mysqli_sql_exception("Unknown Error") : $lastError;
@@ -885,8 +889,16 @@ class SqlExecutor {
     protected function logErrorAdd(int $errorNumber, string $errorMessage, string|mysqli_stmt $query, array $parameters, $attempt):void {
         if(count($this->logError) > $this->maxLogEntries)
             return;
-        $template = SqlUtils::createQueryTemplate($query);
-        $this->logError[$template] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt, "template" => $template];
+        $queryString = is_string($query) ? $query : $this->lastPreparedQuery;
+        $template = SqlUtils::createQueryTemplate($queryString);
+        $this->logError[$template] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $queryString, "parameters" => $parameters, "attempt" => $attempt, "template" => $template];
+    }
+
+    /**
+     * Sanitize a user-supplied comment for interpolation inside a SQL comment block.
+     */
+    protected function commentIt(string|int $comment): string {
+        return str_replace(["/*", "*/"], "", (string)$comment);
     }
 
 }

@@ -127,6 +127,18 @@ class ValidatorSql {
                 continue;
             }
 
+            // MySQL unique indexes allow multiple NULLs: a NULL value can never collide
+            $hasNull = false;
+            foreach ($cols as $col) {
+                if ($data[$col] === null) {
+                    $hasNull = true;
+                    break;
+                }
+            }
+            if ($hasNull) {
+                continue;
+            }
+
             $whereParts = [];
             $params     = [];
             foreach ($cols as $col) {
@@ -134,19 +146,20 @@ class ValidatorSql {
                 $params[]     = $data[$col];
             }
 
-            // Exclude current record when PK values are available
-            $pkExclusion = '';
+            // Exclude the current record when PK values are available
+            $pkParts = [];
             foreach ($primaryKeys as $pkCol) {
                 if (array_key_exists($pkCol, $data) && $data[$pkCol] !== null && $data[$pkCol] !== '') {
-                    $pkExclusion .= " AND " . SqlUtils::fieldIt($pkCol) . " = ?";
-                    $params[]     = $data[$pkCol];
+                    $pkParts[] = SqlUtils::fieldIt($pkCol) . " = ?";
+                    $params[]  = $data[$pkCol];
                 }
             }
+            $pkExclusion = empty($pkParts) ? '' : " AND NOT (" . implode(' AND ', $pkParts) . ")";
 
             $tbl   = SqlUtils::fieldIt($tableName);
             $where = implode(' AND ', $whereParts);
 
-            $exists = $sql->firstValue("SELECT 1 FROM $tbl WHERE NOT ( $where$pkExclusion) LIMIT 1", $params);
+            $exists = $sql->firstValue("SELECT 1 FROM $tbl WHERE $where$pkExclusion LIMIT 1", $params);
             if ($exists) {
                 $colList = implode(', ', $cols);
                 foreach ($cols as $col) {
@@ -221,7 +234,7 @@ class ValidatorSql {
             return ["Column '$colName' must be a numeric integer value."];
         }
 
-        $strVal = (string)$value;
+        $strVal = self::toBcSafe($value);
 
         // Reject non-zero fractional part (e.g. "3.14") but accept "3.00"
         if (str_contains($strVal, '.')) {
@@ -256,6 +269,18 @@ class ValidatorSql {
         return [];
     }
 
+    /**
+     * bcmath rejects scientific notation ("1e3"), which is_numeric accepts:
+     * expand it to a plain decimal string before any bccomp/bcadd call.
+     */
+    private static function toBcSafe(mixed $value): string {
+        $strVal = (string)$value;
+        if (stripos($strVal, 'e') !== false) {
+            $strVal = rtrim(rtrim(sprintf('%.10F', (float)$value), '0'), '.');
+        }
+        return $strVal;
+    }
+
     // -------------------------------------------------------------------------
     // Decimal / numeric
     // -------------------------------------------------------------------------
@@ -271,7 +296,7 @@ class ValidatorSql {
         $precision = (int)($col['numeric_precision'] ?? 10);
         $scale     = (int)($col['numeric_scale'] ?? 0);
         $unsigned  = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
-        $strVal    = (string)$value;
+        $strVal    = self::toBcSafe($value);
 
         // Round to defined scale without converting to float
         $rounded = bcadd($strVal, '0', $scale);

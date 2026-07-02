@@ -157,6 +157,10 @@ class QueryBuilder {
                 }
                 if(!empty($inClause))
                     $clause[] = "$col IN (" . implode(",", $inClause) . ")";
+                else
+                    // IN over an empty set matches nothing; dropping the condition
+                    // instead would silently widen the WHERE
+                    $clause[] = "$col IN (NULL)";
             } else {
                 $clause[] = "$col=?";
                 $parameters[] = $value;

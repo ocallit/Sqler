@@ -83,6 +83,7 @@ class Historian {
      * @param string $userNick
      * @param string $motive
      * @return void
+     * @throws Exception when the audit row cannot be written: an audit trail must not fail silently
      */
     public function register(string $action, array $primaryKeys, array $values, string $userNick = '', string $motive = ''):void {
         $insertValues = [
@@ -98,12 +99,12 @@ class Historian {
         try {
             $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
             return;
-        } catch (Exception) { }
-        if($this->sqlExecutor->is_last_error_table_not_found())
-            try {
-                $this-> historyTableCreate();
-                $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
-            } catch (Exception) {}
+        } catch (Exception $e) {
+            if(!$this->sqlExecutor->is_last_error_table_not_found())
+                throw $e;
+        }
+        $this->historyTableCreate();
+        $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
     }
 
     /**
@@ -152,7 +153,7 @@ class Historian {
  * @throws Exception
      */
     public function getNLastChanges(array $primaryKeyValues, int $numEntries =  7 ):array {
-        return $this->getChanges($primaryKeyValues, 0, "LIMIT $numEntries");
+        return $this->getChanges($primaryKeyValues, 0, $numEntries);
     }
 
     /**
@@ -177,19 +178,26 @@ class Historian {
      * @return string HTML table representing the change's history.
      */
     public function changesAsHTML(array $changes): string {
-        $html = '<table class="laTabla">' . '<tbody>';
+        $html = '<table class="laTabla"><tbody>';
         foreach ($changes as $change) {
             if(empty($change['diff']))
                 continue;
-            $html .= '<tr>' . '<td class="cen">' . $change['date'] . '<br>' . $change['action'] . '<br>' . $change['user_nick'] .
-                '<td><table><thead><tr><th> <th>Era<th>Cambio A:</tr></thead><tbody>';
-                foreach ($change['diff'] as $field => $diffData) {
-                    $before = is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'];
-                    $after = is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'];
-                    $html .= '<tr><td>' . SqlUtils::toLabel($field) . '<td>' . $before . '<td>' . $after . '</table>';
-                }
+            $html .= '<tr><td class="cen">' . $this->e($change['date']) . '<br>' . $this->e($change['action']) .
+                '<br>' . $this->e($change['user_nick']) . '</td>' .
+                '<td><table><thead><tr><th></th><th>Era</th><th>Cambio A:</th></tr></thead><tbody>';
+            foreach ($change['diff'] as $field => $diffData) {
+                $before = is_array($diffData['before']) ? json_encode($diffData['before'], SqlUtils::JSON_MYSQL_OPTIONS) : $diffData['before'];
+                $after = is_array($diffData['after']) ? json_encode($diffData['after'], SqlUtils::JSON_MYSQL_OPTIONS) : $diffData['after'];
+                $html .= '<tr><td>' . $this->e(SqlUtils::toLabel($field)) . '</td><td>' . $this->e($before) .
+                    '</td><td>' . $this->e($after) . '</td></tr>';
+            }
+            $html .= '</tbody></table></td></tr>';
         }
         return  $html . '</tbody></table>';
+    }
+
+    protected function e(mixed $value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 
     protected function primaryKeyEncode(array $values):string {
@@ -219,6 +227,12 @@ class Historian {
 
     protected function diff(array $recordHistory): array {
         $records = array_values($recordHistory);  // Reindex for sequential access
+        foreach($records as &$record) {
+            // record is stored as JSON; differ() needs the decoded array
+            if(is_string($record['record'] ?? null))
+                $record['record'] = json_decode($record['record'], true) ?? [];
+        }
+        unset($record);
         $count = count($records);
         if($count < 2)
             return [];

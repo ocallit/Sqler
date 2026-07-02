@@ -14,6 +14,7 @@ use RuntimeException;
  * - initialize(SqlExecutor $sql): void — call once at startup
  * - getInstance(): static
  * - clear(): void — flush cached metadata
+ * - reset(): void — drop the singleton (mainly for tests)
  *
  * Schema inspection:
  * - table($table, $db = ''): [colName => [name, data_type, Type, default_value, is_nullable, ...]]
@@ -194,13 +195,21 @@ class DatabaseMetadata {
     }
 
     /**
+     * Drop the singleton so initialize() can be called again (mainly for tests).
+     */
+    public static function reset(): void {
+        static::$instance = NULL;
+    }
+
+    /**
      * @param string $database
      * @return PrimaryKeysByTable array<string TableName, array<primaryKeyColumn, primaryKeyColumn>>
      * @throws Exception
      */
     public function primaryKeys(string $database = ""): array {
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
-        if(empty($this->primaryKeys[$dbName])) {
+        if(!isset($this->primaryKeys[$dbName])) {
+            $this->primaryKeys[$dbName] = [];
             $sql = "SELECT /*" . __METHOD__ . "*/ t.TABLE_NAME, c.COLUMN_NAME
                 FROM information_schema.TABLES t
                     JOIN information_schema.KEY_COLUMN_USAGE c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
@@ -220,7 +229,8 @@ class DatabaseMetadata {
      */
     public function uniqueIndexes(string $tableName = "", string $database = ""): array {
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
-        if(empty($this->uniqueIndexes[$dbName])) {
+        if(!isset($this->uniqueIndexes[$dbName])) {
+            $this->uniqueIndexes[$dbName] = [];
             $method = __METHOD__;
             $sql = "SELECT /*$method*/ 
                         TABLE_NAME, 
@@ -311,7 +321,11 @@ class DatabaseMetadata {
         }
 
         $metadata = [];
-        $fields = mysqli_fetch_fields($mysqliResult);
+        try {
+            $fields = mysqli_fetch_fields($mysqliResult);
+        } finally {
+            $mysqliResult->free();
+        }
 
         foreach($fields as $field) {
             $orgDatabase = $database; //@Todo
@@ -402,7 +416,7 @@ class DatabaseMetadata {
      *
      * @param string $tableName
      * @param string $database
-     * @return ForeignKeysAllMeta array [column_name => ['referenced_table' => string, 'referenced_column' => string]]
+     * @return ForeignKeyMap array [column_name => ['referenced_table' => string, 'referenced_column' => string]]
      * @throws Exception
      */
     public function foreignKeyDeduce(string $tableName, string $database = ""): array {
@@ -453,7 +467,6 @@ class DatabaseMetadata {
         }
 
         $this->deducedForeignKeys[$dbName][$tableName] = $deduced;
-        $this->foreignKeys[$dbName][$tableName] = $this->getForeignKeys($tableName, $database) + $this->foreignKeyDeduce($tableName, $database);
         $this->deducedForeignKeysDDL[$dbName][$tableName] = $ddl;
 
         return $deduced;
@@ -544,13 +557,11 @@ class DatabaseMetadata {
     }
 
     /**
-     * Get check constraints for a table, indexed by column name.
-     * For each column, lists the constraints that reference it, with constraint_name => check_clause.
-     * Constraints may reference multiple columns; they will appear under each referenced column.
+     * Get the CHECK constraints defined on a table.
      *
      * @param string $tableName
      * @param string $database
-     * @return CheckConstraintList array [column_name => [constraint_name => check_clause, ...]]
+     * @return CheckConstraintList list of ['CONSTRAINT_NAME' => string, 'CHECK_CLAUSE' => string]
      */
     public function getCheckConstraints(string $tableName, string $database = ""): array {
         if(empty($tableName)) {

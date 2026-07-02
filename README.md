@@ -11,7 +11,7 @@
 - **🔍 Database Introspection** - Complete metadata access for tables, columns, relationships
 - **📝 Audit Trail System** - Full change tracking with diff analysis and user attribution
 - **⚡ Smart Query Building** - Parameterized queries with MySQL function recognition
-- **🔒 Transaction Management** - Nested transaction support with automatic cleanup
+- **🔒 Transaction Management** - Transactions with automatic retry and rollback of unclosed transactions on cleanup
 - **📋 Query & Error Logging** - Comprehensive logging for debugging and monitoring
 
 ## AI Assistant Documentation
@@ -21,9 +21,9 @@
 ## Installation & Quick Start
 
 ### Requirements
-- PHP 8.2+
-- MySQLi extension
-- MySQL 5.7+ / MariaDB 10.2+
+- PHP 8.4+
+- MySQLi and bcmath extensions
+- MySQL 8.0.19+ (default collation `utf8mb4_0900_ai_ci` and the `INSERT ... AS new` ON DUPLICATE syntax require MySQL 8; pass `new QueryBuilder(false)` and an explicit collation for older servers)
 
 ### Installation via Composer
 ```bash
@@ -50,7 +50,7 @@ $sql = new SqlExecutor([
 $userCount = $sql->firstValue("SELECT COUNT(*) FROM users WHERE active = ?", [1]);
 $user = $sql->row("SELECT * FROM users WHERE id = ?", [123]);
 $users = $sql->array("SELECT * FROM users WHERE department = ?", ['IT']);
-$usersByDept = $sql->arrayKeyed("SELECT * FROM users", 'department');
+$usersByDept = $sql->multiKey("SELECT * FROM users", ['department', 'id']); // rows grouped by department, keyed by id
 
 // Build queries safely
 $qb = new QueryBuilder();
@@ -135,7 +135,7 @@ $meta = DatabaseMetadata::getInstance();
 // Get table structure
 $userColumns = $meta->table('users');
 foreach ($userColumns as $column) {
-    echo "{$column['Field']} - {$column['Type']} - {$column['Key']}\n";
+    echo "{$column['name']} - {$column['Type']} - {$column['key_type']}\n";
 }
 
 // Get relationships
@@ -215,7 +215,7 @@ $queryLog = $sql->getLog();        // All executed queries
 $errorLog = $sql->getErrorLog();   // All errors with retry attempts
 
 // Specific error type checking
-if ($sql->is_last_error_foreign_key_violation()) {
+if ($sql->is_last_error_invalid_foreign_key()) {
     echo "Referenced record doesn't exist";
 } elseif ($sql->is_last_error_child_records_exist()) {
     echo "Cannot delete: child records exist";
@@ -241,7 +241,7 @@ $sql = new SqlExecutor(
         MYSQLI_OPT_CONNECT_TIMEOUT => 10
     ],
     charset: 'utf8mb4',
-    coalition: 'utf8mb4_0900_ai_ci'
+    collation: 'utf8mb4_0900_ai_ci'
 );
 ```
 
@@ -268,7 +268,7 @@ The library provides specific error detection methods:
 
 - `is_last_error_table_not_found()` - Missing tables
 - `is_last_error_duplicate_key()` - Unique constraint violations
-- `is_last_error_foreign_key_violation()` - Invalid foreign key references
+- `is_last_error_invalid_foreign_key()` - Invalid foreign key references
 - `is_last_error_child_records_exist()` - Cannot delete parent with children
 - `is_last_error_column_not_found()` - Invalid column names
 
@@ -279,7 +279,7 @@ MIT License - see LICENSE file for details.
 ## Contributing
 
 Contributions are welcome! Please ensure:
-- PHP 8.2+ compatibility
+- PHP 8.4+ compatibility
 - Comprehensive error handling
 - Unit tests for new features
 - Documentation updates

@@ -41,6 +41,12 @@ The repository provides a complete MySQL database access layer with:
 
   - **Key Use**: Escaping field names (fieldIt) and formatting labels.
 
+- ### ValidatorSql ([API](#6-validatorsql-class))
+  Validates form/array data against the live MySQL table schema
+  - **Benefit**: One static call checks types, lengths, ranges, ENUM/SET membership, FK existence, unique indexes and CHECK constraints.
+
+  - **Key Use**: Validating HTML form submissions before INSERT/UPDATE.
+
 ---
 
 ## 1. SqlExecutor Class
@@ -59,18 +65,18 @@ Core database execution class providing MySQLi wrapper with automatic retry on l
 
 ### Constructor
 ```php
-__construct(array $connect, array $connect_options = [], string $charset = 'utf8', string $coalition = 'utf8_unicode_ci', int $flags = 0)
+__construct(array $connect, array $connect_options = [], string $charset = 'utf8mb4', string $collation = 'utf8mb4_0900_ai_ci', int $flags = 0)
 ```
 **Parameters:**
 - `$connect`: Connection parameters [hostname, username, password, database, port, socket, flags]
 - `$connect_options`: MySQLi options (default: AUTOCOMMIT = 1)
-- `$charset`: Character set (default: utf8)
-- `$coalition`: Collation (default: utf8_unicode_ci)
+- `$charset`: Character set (default: utf8mb4)
+- `$collation`: Collation (default: utf8mb4_0900_ai_ci)
 
 ### Query Execution Methods
 
-#### `query(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result`
-**Returns**: Boolean for non-SELECT queries, mysqli_result for SELECT queries
+#### `query(string|mysqli_stmt $query, array $parameters = []): bool|array`
+**Returns**: Boolean for non-SELECT queries; for SELECT queries, all rows as `[[column_name => value, ...], ...]`
 **Throws**: Exception on error
 **Purpose**: Execute any SQL query with optional parameters
 
@@ -121,10 +127,10 @@ __construct(array $connect, array $connect_options = [], string $charset = 'utf8
 **Structure**:[ 'North' => [ 'Chicago' => ['region' => 'North', 'city' => 'Chicago', 'store_id' => 101, 'total' => 500.00] ] ]
 
 #### `multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array`
-**Returns**: Multi-dimensional array using all but last column as keys, last column as values
+**Returns**: Multi-dimensional array using all but last column as keys, last-column values accumulated in a list
 **Use**: Creating nested structures from flat query results
-**Row**: ['Category', 'SubCategory', 'Value']
-**Structure**:[ 'Category' => [ 'SubCategory' => 'Value' ] ]
+**Rows**: ['Category', 'SubCategory', 'Value1'] ['Category', 'SubCategory', 'Value2']
+**Structure**: [ 'Category' => [ 'SubCategory' => ['Value1', 'Value2'] ] ]
 
 #### `multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array`
 **Returns: Multi-dimensional array. Uses all but the last 2 columns as path keys. The next-to-last column becomes the final key, and the last column is accumulated into a list (array) of values.
@@ -139,18 +145,18 @@ __construct(array $connect, array $connect_options = [], string $charset = 'utf8
 
 ### Transaction Methods
 
-#### `begin(string $comment = ''): bool`
+#### `begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void`
 **Purpose**: Start transaction with optional comment for logging
 
-#### `commit(string $comment = ''): bool`
+#### `commit(string|int $comment = ''): void`
 **Purpose**: Commit current transaction
 
-#### `rollback(string $comment = ''): bool`
+#### `rollback(string|int $comment = ''): void`
 **Purpose**: Rollback current transaction
 
 #### `transaction(array $queries, string|int $comment = ''): void`
-**Purpose**: Execute multiple queries in a transaction with automatic retry
-**Throws**: Exception if all retry attempts fail
+**Purpose**: Execute multiple plain-SQL queries in a transaction, retrying only on retryable errors (deadlock, lock timeout, connection lost)
+**Throws**: Exception on non-retryable errors, or if all retry attempts fail
 
 ### Error Detection Helper Methods
 
@@ -419,6 +425,32 @@ Static utility methods for SQL string handling and formatting.
 
 ---
 
+## 6. ValidatorSql Class
+
+**IA Note**: Static validator; requires `DatabaseMetadata::initialize($sql)` before first use. Needs ext-bcmath.
+
+### Purpose
+Validates an associative array of column values against a table's MySQL schema: type/range checks (integers, decimals via bcmath, dates, times, ENUM/SET, BIT), max string lengths, NOT NULL, foreign key existence, unique index collisions (excluding the current row by PK), and CHECK constraints (evaluated server-side against a derived table).
+
+### Method
+
+#### `ValidatorSql::validate(string $tableName, array $data, SqlExecutor $sql, string $database = ""): array`
+**Returns**: `['valid' => bool, 'errors' => array<column, string[]>, 'warnings' => array<column, string[]>]`
+**Behavior:**
+- Primary key column(s) must be present in `$data` (missing PK is an error)
+- Non-PK columns absent from `$data` with no default and NOT NULL produce warnings, not errors
+- Unique-index checks skip indexes containing NULL values (MySQL allows multiple NULLs)
+- Unknown columns in `$data` are errors
+
+```php
+$result = ValidatorSql::validate('orders', $_POST, $sql);
+if(!$result['valid']) {
+    foreach($result['errors'] as $column => $messages) { /* show to user */ }
+}
+```
+
+---
+
 ## Error Handling Patterns
 
 ### SqlExecutor Error Flow
@@ -505,13 +537,13 @@ $primaryKeys = $meta->primaryKeys();
 
 ---
 
-## Potential Issues Identified
+## Known Limitations
 
-
-1. **Historian Logic**: In `diff()` method, the loop seems to have inverted logic - `continue` when `$differ` is not empty
-2. **Transaction Counter**: `openTransactions` counter could get out of sync if exceptions occur during begin/commit/rollback
-3. **Memory Usage**: Logs have max entries but no cleanup mechanism
-4. **Error Handling**: Some methods don't check if `mysqli` is null before accessing properties they throw an error
+1. **Log retention**: query/error logs stop growing at `maxLogEntries` (256); there is no rotation, so long-running processes keep only the earliest entries
+2. **Historian::getChanges()** returns only entries that differ from the previous snapshot; a record with a single history row (e.g. just the insert) yields an empty array
+3. **`transaction()`** accepts plain SQL strings only — parameterized queries must use manual `begin()`/`commit()`
+4. **`multiKey`/`multiKeyN`**: a NULL value in a key column is keyed under the column *name* (`$row[$col] ?? $col`), not under an empty string
+5. **`ValidatorSql`**: BIT columns are validated as 0/1 only; datetime values with fractional seconds are rejected even though MySQL accepts them
 
 ---
 

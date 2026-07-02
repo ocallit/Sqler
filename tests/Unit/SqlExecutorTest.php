@@ -5,35 +5,53 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\CoversClass;
 use Ocallit\Sqler\SqlExecutor;
 
+/**
+ * mysqli's properties (errno, ...) are virtual and cannot be set on mocks or
+ * shadowed in subclasses, so the error-check tests stub getLastErrorNumber(),
+ * which all is_last_error_*() methods read through.
+ */
+class StubErrnoSqlExecutor extends SqlExecutor {
+    public int $stubErrno = 0;
 
+    public function __construct() {
+        parent::__construct([]);
+    }
+
+    public function getLastErrorNumber(): int {
+        return $this->stubErrno;
+    }
+}
+
+/**
+ * Feeds a stubbed mysqli_result through the protected runSql() seam so the
+ * result-shaping methods (query, keyValue, vector, multiKey*, ...) can be
+ * tested without a database connection.
+ */
+class StubResultSqlExecutor extends SqlExecutor {
+    public function __construct(private readonly mysqli_result|bool $stubResult) {
+        parent::__construct([]);
+    }
+
+    protected function runSql(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result {
+        return $this->stubResult;
+    }
+}
 
 #[CoversClass(SqlExecutor::class)]
 class SqlExecutorTest extends TestCase {
-    private SqlExecutor $sqlExecutor;
 
-    protected function setUp(): void {
-        // Create SqlExecutor with dummy connection params since we're only testing utility methods
-        $this->sqlExecutor = new SqlExecutor([
-          'hostname' => 'localhost',
-          'username' => 'test',
-          'password' => 'test',
-          'database' => 'test',
-        ]);
+    private function executorReturning(array $rows): StubResultSqlExecutor {
+        $result = $this->createMock(mysqli_result::class);
+        $result->method('fetch_array')->willReturnOnConsecutiveCalls(...[...$rows, null]);
+        return new StubResultSqlExecutor($result);
     }
-    
+
     #[DataProvider('isLastErrorProvider')]
     public function testErrorCheckMethods(string $method, int $errorCode, bool $expected): void {
-        // Use reflection to set the mysqli property with a mock
-        $reflection = new ReflectionClass($this->sqlExecutor);
-        $mysqliProperty = $reflection->getProperty('mysqli');
-        $mysqliProperty->setAccessible(TRUE);
+        $executor = new StubErrnoSqlExecutor();
+        $executor->stubErrno = $errorCode;
 
-        $mockMysqli = $this->createMock(\mysqli::class);
-        $mockMysqli->errno = $errorCode;
-        $mysqliProperty->setValue($this->sqlExecutor, $mockMysqli);
-
-        $result = $this->sqlExecutor->$method();
-        $this->assertSame($expected, $result);
+        $this->assertSame($expected, $executor->$method());
     }
 
     public static function isLastErrorProvider(): array {
@@ -72,49 +90,116 @@ class SqlExecutorTest extends TestCase {
     }
 
     public function testGetLastErrorNumberWithNoMysqli(): void {
-        // Test when mysqli is null
-        $reflection = new ReflectionClass($this->sqlExecutor);
-        $mysqliProperty = $reflection->getProperty('mysqli');
-        $mysqliProperty->setAccessible(TRUE);
-        $mysqliProperty->setValue($this->sqlExecutor, NULL);
-
-        $result = $this->sqlExecutor->getLastErrorNumber();
-        $this->assertSame(0, $result);
-    }
-
-    public function testGetLastErrorNumberWithValidMysqli(): void {
-        // Test when mysqli has an error
-        $reflection = new ReflectionClass($this->sqlExecutor);
-        $mysqliProperty = $reflection->getProperty('mysqli');
-        $mysqliProperty->setAccessible(TRUE);
-
-        $mockMysqli = $this->createMock(\mysqli::class);
-        $mockMysqli->errno = 1146;
-        $mysqliProperty->setValue($this->sqlExecutor, $mockMysqli);
-
-        $result = $this->sqlExecutor->getLastErrorNumber();
-        $this->assertSame(1146, $result);
-    }
-
-    public function testGetLogAndGetErrorLog(): void {
-        $log = $this->sqlExecutor->getLog();
-        $errorLog = $this->sqlExecutor->getErrorLog();
-
-        $this->assertIsArray($log);
-        $this->assertIsArray($errorLog);
+        $sqlExecutor = new SqlExecutor([
+          'hostname' => 'localhost',
+          'username' => 'test',
+          'password' => 'test',
+          'database' => 'test',
+        ]);
+        $this->assertSame(0, $sqlExecutor->getLastErrorNumber());
     }
 
     public function testErrorCheckMethodsWithNullMysqli(): void {
-        // Test error check methods when mysqli is null
-        $reflection = new ReflectionClass($this->sqlExecutor);
-        $mysqliProperty = $reflection->getProperty('mysqli');
-        $mysqliProperty->setAccessible(TRUE);
-        $mysqliProperty->setValue($this->sqlExecutor, NULL);
+        $sqlExecutor = new SqlExecutor([
+          'hostname' => 'localhost',
+          'username' => 'test',
+          'password' => 'test',
+          'database' => 'test',
+        ]);
 
-        $this->assertFalse($this->sqlExecutor->is_last_error_table_not_found());
-        $this->assertFalse($this->sqlExecutor->is_last_error_duplicate_key());
-        $this->assertFalse($this->sqlExecutor->is_last_error_invalid_foreign_key());
-        $this->assertFalse($this->sqlExecutor->is_last_error_child_records_exist());
-        $this->assertFalse($this->sqlExecutor->is_last_error_column_not_found());
+        $this->assertFalse($sqlExecutor->is_last_error_table_not_found());
+        $this->assertFalse($sqlExecutor->is_last_error_duplicate_key());
+        $this->assertFalse($sqlExecutor->is_last_error_invalid_foreign_key());
+        $this->assertFalse($sqlExecutor->is_last_error_child_records_exist());
+        $this->assertFalse($sqlExecutor->is_last_error_column_not_found());
+    }
+
+    public function testGetLogAndGetErrorLog(): void {
+        $sqlExecutor = new StubErrnoSqlExecutor();
+
+        $this->assertIsArray($sqlExecutor->getLog());
+        $this->assertIsArray($sqlExecutor->getErrorLog());
+    }
+
+    public function testQueryReturnsArrayOfRowsForSelect(): void {
+        $executor = $this->executorReturning([
+          ['id' => 1, 'name' => 'John'],
+          ['id' => 2, 'name' => 'Jane'],
+        ]);
+
+        $rows = $executor->query("SELECT id, name FROM users");
+
+        $this->assertSame([
+          ['id' => 1, 'name' => 'John'],
+          ['id' => 2, 'name' => 'Jane'],
+        ], $rows);
+    }
+
+    public function testQueryReturnsEmptyArrayForSelectWithNoRows(): void {
+        $executor = $this->executorReturning([]);
+
+        $this->assertSame([], $executor->query("SELECT id FROM users WHERE 1=0"));
+    }
+
+    public function testQueryReturnsBoolForNonSelect(): void {
+        $executor = new StubResultSqlExecutor(true);
+
+        $this->assertTrue($executor->query("UPDATE users SET active = 1"));
+    }
+
+    public function testKeyValue(): void {
+        $executor = $this->executorReturning([
+          ['open', 3],
+          ['closed', 5],
+        ]);
+
+        $this->assertSame(['open' => 3, 'closed' => 5],
+          $executor->keyValue("SELECT status, cnt FROM t"));
+    }
+
+    public function testVector(): void {
+        $executor = $this->executorReturning([[1], [2], [3]]);
+
+        $this->assertSame([1, 2, 3], $executor->vector("SELECT id FROM t"));
+    }
+
+    public function testMultiKey(): void {
+        $executor = $this->executorReturning([
+          ['dept' => 'IT', 'role' => 'Admin', 'name' => 'John'],
+          ['dept' => 'IT', 'role' => 'User', 'name' => 'Bob'],
+        ]);
+
+        $this->assertSame([
+          'IT' => [
+            'Admin' => ['dept' => 'IT', 'role' => 'Admin', 'name' => 'John'],
+            'User' => ['dept' => 'IT', 'role' => 'User', 'name' => 'Bob'],
+          ],
+        ], $executor->multiKey("SELECT dept, role, name FROM users", ['dept', 'role']));
+    }
+
+    public function testMultiKeyLastAccumulatesRowsSharingTheSameKeyPath(): void {
+        $executor = $this->executorReturning([
+          ['A', 'X', 'v1'],
+          ['A', 'X', 'v2'],
+          ['A', 'Y', 'v3'],
+          ['B', 'X', 'v4'],
+        ]);
+
+        $this->assertSame([
+          'A' => ['X' => ['v1', 'v2'], 'Y' => ['v3']],
+          'B' => ['X' => ['v4']],
+        ], $executor->multiKeyLast("SELECT k1, k2, v FROM t"));
+    }
+
+    public function testMultiKeyValueAccumulatesLastColumn(): void {
+        $executor = $this->executorReturning([
+          ['A', 'key1', 'val1'],
+          ['A', 'key1', 'val2'],
+          ['A', 'key2', 'val3'],
+        ]);
+
+        $this->assertSame([
+          'A' => ['key1' => ['val1', 'val2'], 'key2' => ['val3']],
+        ], $executor->multiKeyValue("SELECT g, k, v FROM t"));
     }
 }
