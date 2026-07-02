@@ -278,8 +278,10 @@ class QueryBuilderTest extends TestCase {
 
     public function testSyncBridgeTableReturnsDeleteThenInsertStatements(): void {
         $result = $this->queryBuilder->syncBridgeTable('tableA_to_tableB', 'tableA_id', 'tableB_id', [
-          ['tableA_id' => 'a1', 'tableB_id' => 1, 'note' => 'x'],
-          ['tableA_id' => 'a1', 'tableB_id' => 2, 'note' => 'y'],
+          ['tableA_id' => 'a1', 'tableB_id' => 1, 'note' => 'x', 'priority' => 1],
+          ['tableA_id' => 'a1', 'tableB_id' => 2, 'note' => 'y', 'priority' => 2],
+          ['tableA_id' => 'a2', 'tableB_id' => 1, 'note' => 'z', 'priority' => 3],
+          ['tableA_id' => 'a2', 'tableB_id' => 5, 'note' => 'w', 'priority' => 4],
         ]);
 
         $this->assertCount(2, $result);
@@ -292,19 +294,26 @@ class QueryBuilderTest extends TestCase {
 
         [$delete, $insert] = $result;
 
-        $this->assertStringContainsString('DELETE', $delete['query']);
-        $this->assertStringContainsString('`tableA_to_tableB`', $delete['query']);
-        $this->assertStringContainsString('`tableA_id` IN (?)', $delete['query']);
-        $this->assertStringContainsString('(`tableA_id`,`tableB_id`) NOT IN ((?,?),(?,?))', $delete['query']);
-        $this->assertSame(['a1', 'a1', 1, 'a1', 2], $delete['parameters']);
+        $comment = '/*Ocallit\Sqler\QueryBuilder::syncBridgeTable*/';
 
-        $this->assertStringContainsString('INSERT', $insert['query']);
-        $this->assertStringContainsString('`tableA_to_tableB`', $insert['query']);
-        $this->assertStringContainsString('(`tableA_id`,`tableB_id`,`note`)', $insert['query']);
-        $this->assertStringContainsString('VALUES(?,?,?),(?,?,?)', $insert['query']);
-        $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $insert['query']);
-        $this->assertStringContainsString('`note`=new.`note`', $insert['query']);
-        $this->assertSame(['a1', 1, 'x', 'a1', 2, 'y'], $insert['parameters']);
+        $this->assertSame(
+          "DELETE $comment FROM `tableA_to_tableB`" .
+          " WHERE `tableA_id` IN (?,?)" .
+          " AND (`tableA_id`,`tableB_id`) NOT IN ((?,?),(?,?),(?,?),(?,?))",
+          $delete['query']
+        );
+        $this->assertSame(['a1', 'a2', 'a1', 1, 'a1', 2, 'a2', 1, 'a2', 5], $delete['parameters']);
+
+        $this->assertSame(
+          "INSERT $comment INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`,`note`,`priority`)" .
+          " VALUES(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?)" .
+          " AS new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`,`note`=new.`note`,`priority`=new.`priority`",
+          $insert['query']
+        );
+        $this->assertSame(
+          ['a1', 1, 'x', 1, 'a1', 2, 'y', 2, 'a2', 1, 'z', 3, 'a2', 5, 'w', 4],
+          $insert['parameters']
+        );
     }
 
     public function testSyncBridgeTableUsesValuesSyntaxWhenNotUsingNewOnDuplicate(): void {
