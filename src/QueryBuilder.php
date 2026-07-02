@@ -3,7 +3,9 @@
 
 namespace Ocallit\Sqler;
 
+use InvalidArgumentException;
 use function array_key_exists;
+use function array_merge;
 use function implode;
 use function is_array;
 
@@ -15,6 +17,8 @@ use function is_array;
  * - insert($table, $data, $onDupUpdate=false, $dontUpdate=[], $override=[], $comment='')
  * - update($table, $data, $where=[], $comment='')
  * - where($conditions, $conjunction='AND', $comment='')
+ * - junctionTable($table, $tableA_column, $tableA_id_value, $tableB_column, $values, $comment='')
+ *     returns a list: [ ['query' => string, 'parameters' => array], ... ] to sync a n:m junction
  *
  * Magic values (not parameterized): NOW(), CURDATE(), CURRENT_TIMESTAMP, UUID(), etc.
  * Where arrays: scalar → '=?', array → 'IN (?,...)'
@@ -159,6 +163,64 @@ class QueryBuilder {
             }
         }
         return ["query" => " $comment (" . implode(" $conjunction ", $clause) . ")", "parameters" => $parameters];
+    }
+
+    /**
+     * Returns the statements to synchronize a junction table (n:m between tableA and tableB)
+     * for a single tableA id: rows in $values are inserted or, if the (tableA_id, tableB_id)
+     * pair already exists, updated (extra columns refreshed); existing rows whose tableB id
+     * is not in $values are deleted. Rows already present are never deleted and re-inserted,
+     * so extra columns, triggers and foreign keys are not churned.
+     * @pure
+     *
+     * @param string $tableName junction table name
+     * @param string $tableA_column junction table column holding tableA's id
+     * @param int|string $tableA_id_value the tableA id whose relations are synchronized
+     * @param string $tableB_column junction table column holding tableB's id
+     * @param array $values [ [$tableB_column => value, otherColumn => value, ...], ... ]
+     *   each row must include $tableB_column and may include extra junction columns,
+     *   which are updated ON DUPLICATE KEY. An empty $values deletes all rows for $tableA_id_value.
+     * @param string $comment
+     * @return array [ ['query' => string, 'parameters' => array], ... ] the DELETE first,
+     *   then one INSERT ... ON DUPLICATE KEY UPDATE per row, meant to run in one transaction
+     * @throws InvalidArgumentException when a row in $values is missing $tableB_column
+     */
+    public function junctionTable(string $tableName, string $tableA_column, int|string $tableA_id_value,
+        string $tableB_column, array $values, string $comment = ''
+    ):array {
+        if(empty($comment))
+            $comment = "/*" . __METHOD__ . "*/";
+
+        $keepTableB_ids = [];
+        $upserts = [];
+        foreach($values as $index => $row) {
+            if(!is_array($row) || !array_key_exists($tableB_column, $row))
+                throw new InvalidArgumentException(
+                  __METHOD__ . " values[$index] must be an array with a '$tableB_column' key");
+            $keepTableB_ids[] = $row[$tableB_column];
+            // key columns update to themselves on duplicate, so the clause is never empty
+            // and re-sent existing pairs don't raise a duplicate key error
+            $upserts[] = $this->insert($tableName, [$tableA_column => $tableA_id_value] + $row,
+              true, [], [], $comment);
+        }
+
+        $whereA = $this->where([$tableA_column => $tableA_id_value]);
+        $delete = "DELETE $comment FROM " . SqlUtils::fieldIt($tableName) . " WHERE$whereA[query]";
+        $parameters = $whereA['parameters'];
+        if(!empty($keepTableB_ids)) {
+            $notIn = [];
+            foreach($keepTableB_ids as $id) {
+                if(is_string($id) && array_key_exists($id, $this->dontQuoteValue)) {
+                    $notIn[] = $id;
+                } else {
+                    $notIn[] = "?";
+                    $parameters[] = $id;
+                }
+            }
+            $delete .= " AND " . SqlUtils::fieldIt($tableB_column) . " NOT IN (" . implode(",", $notIn) . ")";
+        }
+
+        return array_merge([["query" => $delete, "parameters" => $parameters]], $upserts);
     }
 
 }

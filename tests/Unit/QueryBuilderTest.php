@@ -271,4 +271,61 @@ class QueryBuilderTest extends TestCase {
           ],
         ];
     }
+
+    public function testJunctionTableSyncsRows(): void {
+        $result = $this->queryBuilder->junctionTable(
+          'tableA_to_tableB', 'tableA_id', 'A-1', 'tableB_id',
+          [
+            ['tableB_id' => 10],
+            ['tableB_id' => 20, 'sort_order' => 2],
+          ]
+        );
+
+        $this->assertCount(3, $result);
+
+        $delete = $result[0];
+        $this->assertStringContainsString('DELETE', $delete['query']);
+        $this->assertStringContainsString('`tableA_to_tableB`', $delete['query']);
+        $this->assertStringContainsString('`tableA_id`=?', $delete['query']);
+        $this->assertStringContainsString('`tableB_id` NOT IN (?,?)', $delete['query']);
+        $this->assertEquals(['A-1', 10, 20], $delete['parameters']);
+
+        $firstUpsert = $result[1];
+        $this->assertStringContainsString('INSERT', $firstUpsert['query']);
+        $this->assertStringContainsString('(`tableA_id`,`tableB_id`)', $firstUpsert['query']);
+        $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $firstUpsert['query']);
+        $this->assertEquals(['A-1', 10], $firstUpsert['parameters']);
+
+        $secondUpsert = $result[2];
+        $this->assertStringContainsString('(`tableA_id`,`tableB_id`,`sort_order`)', $secondUpsert['query']);
+        $this->assertStringContainsString('`sort_order`=new.`sort_order`', $secondUpsert['query']);
+        $this->assertEquals(['A-1', 20, 2], $secondUpsert['parameters']);
+    }
+
+    public function testJunctionTableEmptyValuesDeletesAllForTableAId(): void {
+        $result = $this->queryBuilder->junctionTable('tableA_to_tableB', 'tableA_id', 7, 'tableB_id', []);
+
+        $this->assertCount(1, $result);
+        $this->assertStringContainsString('DELETE', $result[0]['query']);
+        $this->assertStringContainsString('`tableA_id`=?', $result[0]['query']);
+        $this->assertStringNotContainsString('NOT IN', $result[0]['query']);
+        $this->assertEquals([7], $result[0]['parameters']);
+    }
+
+    public function testJunctionTableRowValueOverridesTableAColumn(): void {
+        $result = $this->queryBuilder->junctionTable(
+          'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+          [['tableB_id' => 10, 'tableA_id' => 99]]
+        );
+
+        $this->assertEquals([7, 10], $result[1]['parameters']);
+    }
+
+    public function testJunctionTableMissingTableBColumnThrows(): void {
+        $this->expectException(InvalidArgumentException::class);
+        $this->queryBuilder->junctionTable(
+          'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+          [['sort_order' => 1]]
+        );
+    }
 }

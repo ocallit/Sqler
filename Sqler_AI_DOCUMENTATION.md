@@ -259,6 +259,31 @@ __construct(bool $useNewOnDuplicate = true)
 - Timestamp: `CURRENT_TIMESTAMP()`, `LOCALTIMESTAMP()`, `UNIX_TIMESTAMP()`, `UTC_TIMESTAMP()`
 - UUID: `IA_UUID()`
 
+#### `junctionTable(string $tableName, string $tableA_column, int|string $tableA_id_value, string $tableB_column, array $values, string $comment = ''): array`
+**Returns**: List of statements: `[ ['query' => string, 'parameters' => array], ... ]` — a DELETE first, then one INSERT ... ON DUPLICATE KEY UPDATE per row. Run them in one transaction.
+**Purpose**: Synchronize a junction table (n:m between tableA and tableB) for one tableA id without deleting-and-reinserting the rows that stay.
+**Parameters:**
+- `$tableName`: Junction table name
+- `$tableA_column`: Junction column holding tableA's id
+- `$tableA_id_value`: The tableA id whose relations are synchronized
+- `$tableB_column`: Junction column holding tableB's id
+- `$values`: `[ [$tableB_column => value, otherColumn => value, ...], ... ]` — each row must include `$tableB_column`; extra columns are updated ON DUPLICATE KEY
+  **Behavior:**
+- Rows in `$values` are inserted, or updated if the (tableA_id, tableB_id) pair already exists
+- Existing rows whose tableB id is NOT in `$values` are deleted (`DELETE ... WHERE tableA_id=? AND tableB_id NOT IN (...)`)
+- An empty `$values` deletes all junction rows for `$tableA_id_value`
+- Surviving rows are never touched by DELETE, so triggers, foreign keys and audit columns are not churned
+- Throws `InvalidArgumentException` if a row is missing `$tableB_column`
+
+```php
+$statements = $qb->junctionTable('user_to_role', 'user_id', 7, 'role_id', [
+    ['role_id' => 1],
+    ['role_id' => 2, 'granted_by' => 'admin'],
+]);
+foreach($statements as $stmt)
+    $sql->query($stmt['query'], $stmt['parameters']); // inside a transaction
+```
+
 ---
 
 ## 3. DatabaseMetadata Class (Singleton)
