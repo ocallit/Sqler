@@ -40,9 +40,12 @@ class StubResultSqlExecutor extends SqlExecutor {
 #[CoversClass(SqlExecutor::class)]
 class SqlExecutorTest extends TestCase {
 
-    private function executorReturning(array $rows): StubResultSqlExecutor {
+    private function executorReturning(array $rows, ?int $expectedFetchMode = null): StubResultSqlExecutor {
         $result = $this->createMock(mysqli_result::class);
-        $result->method('fetch_array')->willReturnOnConsecutiveCalls(...[...$rows, null]);
+        $method = $result->method('fetch_array');
+        if($expectedFetchMode !== null)
+            $method->with($expectedFetchMode);
+        $method->willReturnOnConsecutiveCalls(...[...$rows, null]);
         return new StubResultSqlExecutor($result);
     }
 
@@ -121,11 +124,12 @@ class SqlExecutorTest extends TestCase {
         $this->assertIsArray($sqlExecutor->getErrorLog());
     }
 
-    public function testQueryReturnsArrayOfRowsForSelect(): void {
+    public function testQueryReturnsAssociativeRowsForSelect(): void {
+        // MYSQLI_ASSOC expectation: query() must return column-name-keyed rows
         $executor = $this->executorReturning([
           ['id' => 1, 'name' => 'John'],
           ['id' => 2, 'name' => 'Jane'],
-        ]);
+        ], MYSQLI_ASSOC);
 
         $rows = $executor->query("SELECT id, name FROM users");
 
