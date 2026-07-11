@@ -166,12 +166,6 @@ class DatabaseMetadata {
 
     /** @var array<DbCacheKey, ForeignKeysByTable> */
     protected array $foreignKeys = [];
-    /** Cache for deduced foreign keys: [dbKey => [tableName => [col => ['referenced_table'=>, 'referenced_column'=>]]]] */
-
-    /** @var array<DbCacheKey, ForeignKeysByTable> */
-    protected array $deducedForeignKeys = [];
-    /** ALTER TABLE DDL to add deduced foreign keys: [dbKey => [tableName => [col => string]]] */
-    protected array $deducedForeignKeysDDL = [];
 
     /** @var array<DbCacheKey, CheckConstraintsByTable> */
     protected array $checkConstraints = [];
@@ -179,6 +173,14 @@ class DatabaseMetadata {
 
     protected function __construct(SqlExecutor $sqlExecutor) {
         $this->sqlExecutor = $sqlExecutor;
+    }
+
+    public function clear(): void {
+        $this->tableColumns = [];
+        $this->primaryKeys = [];
+        $this->uniqueIndexes = [];
+        $this->foreignKeys = [];
+        $this->checkConstraints = [];
     }
 
     public static function initialize(SqlExecutor $sql): void {
@@ -347,16 +349,6 @@ class DatabaseMetadata {
         return $metadata;
     }
 
-    public function clear(): void {
-        $this->primaryKeys = [];
-        $this->uniqueIndexes = [];
-        $this->tableColumns = [];
-        $this->foreignKeys = [];
-        $this->checkConstraints = [];
-        $this->deducedForeignKeys = [];
-        $this->deducedForeignKeysDDL = [];
-
-    }
 
     /**
      * Get foreign key metadata for one table, keyed by the local column name.
@@ -393,86 +385,6 @@ class DatabaseMetadata {
         }
 
         return $this->foreignKeys[$dbName][$tableName];
-    }
-
-    /**
-     * Deduce foreign keys from column naming convention {externalTable}_id
-     * Skips columns that already have a FK constraint, don't end in _id,
-     * match {tableName}_id, or reference a non-existent / composite-PK table.
-     *
-     * @param string $tableName
-     * @param string $database
-     * @return ForeignKeysAllMeta array [column_name => ['referenced_table' => string, 'referenced_column' => string]]
-     * @throws Exception
-     */
-    public function foreignKeyDeduce(string $tableName, string $database = ""): array {
-        if(empty($tableName))
-            return [];
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
-
-        if(isset($this->deducedForeignKeys[$dbName][$tableName]))
-            return $this->deducedForeignKeys[$dbName][$tableName];
-
-        $columns = $this->table($tableName, $database);
-        $existingFKs = $this->getForeignKeys($tableName, $database);
-        $allPKs = $this->primaryKeys($database);
-
-        $deduced = [];
-        $ddl = [];
-
-        foreach($columns as $colName => $col) {
-            if(isset($existingFKs[$colName]))
-                continue;
-            if(!str_ends_with($colName, '_id'))
-                continue;
-
-            $externalTable = substr($colName, 0, -3); // strip _id
-            if($externalTable === $tableName)
-                continue;
-            if(empty($externalTable))
-                continue;
-
-            if(!isset($allPKs[$externalTable]))
-                continue;
-            if(count($allPKs[$externalTable]) !== 1)
-                continue;
-
-            $referencedColumn = array_key_first($allPKs[$externalTable]);
-
-            $deduced[$colName] = [
-              'referenced_table' => $externalTable,
-              'referenced_column' => $referencedColumn,
-            ];
-
-            $tbl = SqlUtils::fieldIt($tableName);
-            $col = SqlUtils::fieldIt($colName);
-            $refTbl = SqlUtils::fieldIt($externalTable);
-            $refCol = SqlUtils::fieldIt($referencedColumn);
-            $fkName = SqlUtils::fieldIt("fk_{$tableName}_{$colName}");
-            $ddl[$colName] = "ALTER TABLE $tbl ADD CONSTRAINT $fkName FOREIGN KEY ($col) REFERENCES $refTbl ($refCol)";
-        }
-
-        $this->deducedForeignKeys[$dbName][$tableName] = $deduced;
-        $this->foreignKeys[$dbName][$tableName] = $this->getForeignKeys($tableName, $database) + $this->foreignKeyDeduce($tableName, $database);
-        $this->deducedForeignKeysDDL[$dbName][$tableName] = $ddl;
-
-        return $deduced;
-    }
-
-    /**
-     * Get the ALTER TABLE DDL statements for deduced foreign keys
-     * Must call foreignKeyDeduce() first.
-     *
-     * @param string $tableName
-     * @param string $database
-     * @return array [column_name => string DDL statement]
-     * @throws Exception
-     */
-    public function foreignKeyDeduceDDL(string $tableName, string $database = ""): array {
-        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
-        if(!isset($this->deducedForeignKeysDDL[$dbName][$tableName]))
-            $this->foreignKeyDeduce($tableName, $database);
-        return $this->deducedForeignKeysDDL[$dbName][$tableName] ?? [];
     }
 
     /**
@@ -542,6 +454,7 @@ class DatabaseMetadata {
         }
         return ['referencedBy' => $children, 'references' => $parents, 'foreign_keys' => $foreignKeys];
     }
+
 
     /**
      * Get check constraints for a table, indexed by column name.
@@ -644,10 +557,10 @@ class DatabaseMetadata {
 
         // Only one column - use it as both id and label
         if(count($columns) === 1)
-            return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $referencedColumn, $database);
+            return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $referencedColumn);
 
         $labelColumn = $this->determineLabelColumn($columns, $referencedColumn);
-        return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $labelColumn, $database);
+        return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $labelColumn);
     }
 
     /**
@@ -697,13 +610,12 @@ class DatabaseMetadata {
      * @param string $table
      * @param string $idColumn
      * @param string $labelColumn
-     * @param string $database
      * @return OptionMap
      */
-    protected function fetchOptionsFromTable(string $table, string $idColumn, string $labelColumn, string $database = ""): array {
+    protected function fetchOptionsFromTable(string $table, string $idColumn, string $labelColumn): array {
         $idCol = SqlUtils::fieldIt($idColumn);
         $labelCol = SqlUtils::fieldIt($labelColumn);
-        $tbl = SqlUtils::fieldIt($table); //@ToDo database
+        $tbl = SqlUtils::fieldIt($table);
 
         $sql = "SELECT /*" . __METHOD__ . "*/ $idCol, $labelCol FROM $tbl ORDER BY $labelCol";
         return $this->sqlExecutor->keyValue($sql);
@@ -716,17 +628,17 @@ class DatabaseMetadata {
      *
      * @pure
      * @param object{
-     *   type: int,
-     *   flags: int,
-     *   length: int,
-     *   decimals: int,
-     *   orgtable: string,
-     *   orgname: string
-     * } $field
+          *   type: int,
+          *   flags: int,
+          *   length: int,
+          *   decimals: int,
+          *   orgtable: string,
+          *   orgname: string
+          * } $field
      * @return string
      * @throws Exception
      */
-    protected function getType($field): string {
+    protected function getType(object $field): string {
         $baseType = $this->getBaseType($field->type);
 
         if($field->flags & MYSQLI_UNSIGNED_FLAG) {

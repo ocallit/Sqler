@@ -1,4 +1,6 @@
 <?php
+/** @noinspection SqlNoDataSourceInspection */
+/** @noinspection PhpUnused */
 
 namespace Ocallit\Sqler;
 
@@ -27,7 +29,6 @@ class ValidatorSql {
     /**
      * @param string      $tableName
      * @param array<string, mixed> $data       Keys are column names, values are submitted values.
-     * @param SqlExecutor $sql
      * @param string      $database   Optional database name; defaults to the connection's current DB.
      *
      * @return array{
@@ -40,29 +41,15 @@ class ValidatorSql {
     public static function validate(
         string $tableName,
         array $data,
-        SqlExecutor $sql,
         string $database = ""
     ): array {
         $meta = DatabaseMetadata::getInstance();
-
-        $columns        = $meta->table($tableName, $database);
-        $allPrimaryKeys = $meta->primaryKeys($database);
-        $primaryKeys    = $allPrimaryKeys[$tableName] ?? [];
-        $foreignKeys    = $meta->getForeignKeys($tableName, $database);
-        $uniqueIndexes  = $meta->uniqueIndexes($tableName, $database);
-        $checkConstraints = $meta->getCheckConstraints($tableName, $database);
+        $columns = $meta->table($tableName, $database);
 
         /** @var array<string, string[]> $errors */
         $errors   = [];
         /** @var array<string, string[]> $warnings */
         $warnings = [];
-
-        // 1. Primary key columns must be present in $data
-        foreach ($primaryKeys as $pkCol) {
-            if (!array_key_exists($pkCol, $data)) {
-                $errors[$pkCol][] = "Primary key column '$pkCol' is required.";
-            }
-        }
 
         // 2. Warn about non-PK columns absent from $data that have no default
         foreach ($columns as $colName => $col) {
@@ -82,7 +69,7 @@ class ValidatorSql {
             }
         }
 
-        // 3. Per-column type and constraint validation
+        // 3. Per-column type validation
         foreach ($data as $colName => $value) {
             if (!isset($columns[$colName])) {
                 $errors[$colName][] = "Column '$colName' does not exist in table '$tableName'.";
@@ -92,72 +79,6 @@ class ValidatorSql {
             if (!empty($colErrors)) {
                 $errors[$colName] = array_merge($errors[$colName] ?? [], $colErrors);
             }
-        }
-
-        // 4. Foreign key existence checks
-        foreach ($foreignKeys as $colName => $fk) {
-            if (!array_key_exists($colName, $data)) {
-                continue;
-            }
-            $value = $data[$colName];
-            if ($value === null || $value === '') {
-                continue;
-            }
-            $refTable = SqlUtils::fieldIt($fk['referenced_table']);
-            $refCol   = SqlUtils::fieldIt($fk['referenced_column']);
-            $exists   = $sql->firstValue("SELECT 1 FROM $refTable WHERE $refCol = ? LIMIT 1", [$value]);
-            if (!$exists) {
-                $errors[$colName][] = "Value does not exist in referenced table '{$fk['referenced_table']}'.";
-            }
-        }
-
-        // 5. Unique index checks
-        foreach ($uniqueIndexes as $indexName => $index) {
-            $cols = $index['cols'];
-
-            // All indexed columns must be present in $data
-            $allPresent = true;
-            foreach ($cols as $col) {
-                if (!array_key_exists($col, $data)) {
-                    $allPresent = false;
-                    break;
-                }
-            }
-            if (!$allPresent) {
-                continue;
-            }
-
-            $whereParts = [];
-            $params     = [];
-            foreach ($cols as $col) {
-                $whereParts[] = SqlUtils::fieldIt($col) . " = ?";
-                $params[]     = $data[$col];
-            }
-
-            // Exclude current record when PK values are available
-            $pkExclusion = '';
-            foreach ($primaryKeys as $pkCol) {
-                if (array_key_exists($pkCol, $data) && $data[$pkCol] !== null && $data[$pkCol] !== '') {
-                    $pkExclusion .= " AND " . SqlUtils::fieldIt($pkCol) . " = ?";
-                    $params[]     = $data[$pkCol];
-                }
-            }
-
-            $tbl   = SqlUtils::fieldIt($tableName);
-            $where = implode(' AND ', $whereParts);
-
-            $exists = $sql->firstValue("SELECT 1 FROM $tbl WHERE NOT ( $where$pkExclusion) LIMIT 1", $params);
-            if ($exists) {
-                $colList = implode(', ', $cols);
-                foreach ($cols as $col) {
-                    $errors[$col][] = "Duplicate value violates unique index '$indexName' ($colList).";
-                }
-            }
-        }
-
-        // 6. CHECK constraint evaluation via derived table
-        if (!empty($checkConstraints) && !empty($columns)) {
-            self::validateCheckConstraints($checkConstraints, $columns, $data, $sql, $errors);
         }
 
         return [
@@ -172,7 +93,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateValue(mixed $value, array $col): array {
+    protected static function validateValue(mixed $value, array $col): array {
         $dataType   = strtolower($col['data_type'] ?? '');
         $isNullable = strcasecmp($col['is_nullable'] ?? 'NO', 'YES') === 0;
         $colName    = $col['name'];
@@ -214,7 +135,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateInteger(mixed $value, array $col): array {
+    protected static function validateInteger(mixed $value, array $col): array {
         $colName = $col['name'];
 
         if (!is_numeric($value)) {
@@ -261,7 +182,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateDecimal(mixed $value, array $col): array {
+    protected static function validateDecimal(mixed $value, array $col): array {
         $colName = $col['name'];
 
         if (!is_numeric($value)) {
@@ -298,7 +219,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateFloat(mixed $value, array $col): array {
+    protected static function validateFloat(mixed $value, array $col): array {
         if (!is_numeric($value)) {
             return ["Column '{$col['name']}' must be a numeric value."];
         }
@@ -310,7 +231,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateString(mixed $value, array $col): array {
+    protected static function validateString(mixed $value, array $col): array {
         $maxLen = $col['character_maximum_length'] ?? null;
         if ($maxLen === null) {
             return [];
@@ -327,7 +248,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateEnum(mixed $value, array $col): array {
+    protected static function validateEnum(mixed $value, array $col): array {
         $options = DatabaseMetadata::getInstance()->parseEnumSetOptions($col['Type'] ?? '');
         if (!isset($options[(string)$value])) {
             $allowed = implode(', ', array_keys($options));
@@ -341,7 +262,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateSet(mixed $value, array $col): array {
+    protected static function validateSet(mixed $value, array $col): array {
         $options = DatabaseMetadata::getInstance()->parseEnumSetOptions($col['Type'] ?? '');
         $items   = array_map('trim', explode(',', (string)$value));
         $invalid = [];
@@ -362,7 +283,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateDate(mixed $value, array $col): array {
+    protected static function validateDate(mixed $value, array $col): array {
         $str = (string)$value;
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
             return ["Column '{$col['name']}' must be a date in Y-m-d format. Got: $str"];
@@ -379,7 +300,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateDateTime(mixed $value, array $col): array {
+    protected static function validateDateTime(mixed $value, array $col): array {
         $str = (string)$value;
 
         // Complete missing time parts
@@ -416,7 +337,7 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateTime(mixed $value, array $col): array {
+    protected static function validateTime(mixed $value, array $col): array {
         $str = (string)$value;
 
         // Complete missing seconds
@@ -444,80 +365,12 @@ class ValidatorSql {
     // -------------------------------------------------------------------------
 
     /** @return string[] */
-    private static function validateBit(mixed $value, array $col): array {
+    protected static function validateBit(mixed $value, array $col): array {
         if ($value !== 0 && $value !== 1 && $value !== '0' && $value !== '1') {
             return ["Column '{$col['name']}' must be 0 or 1 (BIT)."];
         }
         return [];
     }
 
-    // -------------------------------------------------------------------------
-    // CHECK constraint evaluation via derived-table SELECT
-    // -------------------------------------------------------------------------
 
-    /**
-     * Evaluate each CHECK constraint by building a derived table from $data and running
-     * the constraint clause against it in MySQL. This is safe (parameterized) and correct.
-     *
-     * @param array<array{CONSTRAINT_NAME: string, CHECK_CLAUSE: string}> $checkConstraints
-     * @param array<string, array<string, mixed>> $columns
-     * @param array<string, mixed> $data
-     * @param array<string, string[]> $errors
-     */
-    private static function validateCheckConstraints(
-        array $checkConstraints,
-        array $columns,
-        array $data,
-        SqlExecutor $sql,
-        array &$errors
-    ): void {
-        // Build: SELECT ? AS col1, ? AS col2, NULL AS col3, ...
-        $selectParts = [];
-        $params      = [];
-        foreach ($columns as $colName => $col) {
-            $alias = SqlUtils::fieldIt($colName);
-            if (array_key_exists($colName, $data)) {
-                $selectParts[] = "? AS $alias";
-                $params[]      = $data[$colName];
-            } else {
-                $selectParts[] = "NULL AS $alias";
-            }
-        }
-
-        if (empty($selectParts)) {
-            return;
-        }
-
-        $derivedTable = "SELECT " . implode(', ', $selectParts);
-
-        foreach ($checkConstraints as $constraint) {
-            $constraintName = $constraint['CONSTRAINT_NAME'];
-            $checkClause    = $constraint['CHECK_CLAUSE'];
-
-            try {
-                $result = $sql->firstValue(
-                    "SELECT ($checkClause) AS valid FROM ($derivedTable) AS __chk__",
-                    $params
-                );
-
-                if ($result !== null && !(bool)$result) {
-                    // Attribute the error to referenced columns (best-effort name match)
-                    $targeted = false;
-                    foreach (array_keys($columns) as $colName) {
-                        // Match whole-word occurrences (column name may be backtick-quoted in clause)
-                        if (preg_match('/(?<![`\w])' . preg_quote($colName, '/') . '(?![`\w])/i', $checkClause)) {
-                            $errors[$colName][] = "Check constraint '$constraintName' failed.";
-                            $targeted = true;
-                        }
-                    }
-                    if (!$targeted) {
-                        $errors['__check__'][] = "Check constraint '$constraintName' failed: $checkClause";
-                    }
-                }
-            } catch (Exception) {
-                // Silently skip constraints that cannot be evaluated (e.g. reference functions
-                // not available in the derived-table context).
-            }
-        }
-    }
 }

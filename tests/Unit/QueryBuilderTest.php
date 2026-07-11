@@ -271,4 +271,172 @@ class QueryBuilderTest extends TestCase {
           ],
         ];
     }
+
+
+    /**
+     * The whole returned array is compared with assertSame: statement order,
+     * exact SQL text and exact parameter order are all part of the contract.
+     */
+    #[DataProvider('junctionTableProvider')]
+    public function testJunctionTable(
+      string $tableName,
+      string $tableA_column,
+      int|string $tableA_id_value,
+      string $tableB_column,
+      array $values,
+      string $comment,
+      array $expected
+    ): void {
+        $result = $this->queryBuilder->junctionTable(
+          $tableName, $tableA_column, $tableA_id_value, $tableB_column, $values, $comment
+        );
+
+        $this->assertSame($expected, $result);
+    }
+
+    public static function junctionTableProvider(): array {
+        $c = '/*Ocallit\Sqler\QueryBuilder::junctionTable*/';
+        return [
+          'delete_first_then_one_upsert_per_row_in_input_order' => [
+            'tableA_to_tableB', 'tableA_id', 'A-1', 'tableB_id',
+            [
+              ['tableB_id' => 10],
+              ['tableB_id' => 20, 'sort_order' => 2],
+            ],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
+                'parameters' => ['A-1', 10, 20],
+              ],
+              [
+                'query' => "INSERT $c  INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`",
+                'parameters' => ['A-1', 10],
+              ],
+              [
+                'query' => "INSERT $c  INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`,`sort_order`)  VALUES(?,?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`,`sort_order`=new.`sort_order`",
+                'parameters' => ['A-1', 20, 2],
+              ],
+            ],
+          ],
+          'empty_values_deletes_all_rows_for_tableA_id_no_not_in' => [
+            'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+            [],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?)",
+                'parameters' => [7],
+              ],
+            ],
+          ],
+          'row_carrying_conflicting_tableA_value_is_overridden_by_argument' => [
+            'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+            [['tableB_id' => 10, 'tableA_id' => 99]],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
+                'parameters' => [7, 10],
+              ],
+              [
+                  // 99 must appear nowhere: the argument value 7 wins
+                'query' => "INSERT $c  INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`",
+                'parameters' => [7, 10],
+              ],
+            ],
+          ],
+          'magic_mysql_function_in_extra_column_is_inlined_not_parameterized' => [
+            'user_to_role', 'user_id', 5, 'role_id',
+            [['role_id' => 1, 'granted_at' => 'NOW()']],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `user_to_role` WHERE  (`user_id`=?) AND `role_id` NOT IN (?)",
+                'parameters' => [5, 1],
+              ],
+              [
+                'query' => "INSERT $c  INTO `user_to_role`(`user_id`,`role_id`,`granted_at`)  VALUES(?,?,NOW())"
+                  . "  as new ON DUPLICATE KEY UPDATE `user_id`=new.`user_id`,`role_id`=new.`role_id`,`granted_at`=new.`granted_at`",
+                'parameters' => [5, 1],
+              ],
+            ],
+          ],
+          'duplicate_tableB_ids_kept_in_order_in_not_in_and_upserts' => [
+            'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+            [['tableB_id' => 10], ['tableB_id' => 10]],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
+                'parameters' => [7, 10, 10],
+              ],
+              [
+                'query' => "INSERT $c  INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`",
+                'parameters' => [7, 10],
+              ],
+              [
+                'query' => "INSERT $c  INTO `tableA_to_tableB`(`tableA_id`,`tableB_id`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`",
+                'parameters' => [7, 10],
+              ],
+            ],
+          ],
+          'custom_comment_used_in_every_statement' => [
+            't', 'a', 1, 'b',
+            [['b' => 2]],
+            '/*myC*/',
+            [
+              [
+                'query' => "DELETE /*myC*/ FROM `t` WHERE  (`a`=?) AND `b` NOT IN (?)",
+                'parameters' => [1, 2],
+              ],
+              [
+                'query' => "INSERT /*myC*/  INTO `t`(`a`,`b`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `a`=new.`a`,`b`=new.`b`",
+                'parameters' => [1, 2],
+              ],
+            ],
+          ],
+          'dotted_table_name_is_backticked_per_part' => [
+            'mydb.tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+            [['tableB_id' => 10]],
+            '',
+            [
+              [
+                'query' => "DELETE $c FROM `mydb`.`tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
+                'parameters' => [7, 10],
+              ],
+              [
+                'query' => "INSERT $c  INTO `mydb`.`tableA_to_tableB`(`tableA_id`,`tableB_id`)  VALUES(?,?)"
+                  . "  as new ON DUPLICATE KEY UPDATE `tableA_id`=new.`tableA_id`,`tableB_id`=new.`tableB_id`",
+                'parameters' => [7, 10],
+              ],
+            ],
+          ],
+        ];
+    }
+
+    public function testJunctionTableMissingTableBColumnThrows(): void {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("values[1] must be an array with a 'tableB_id' key");
+        $this->queryBuilder->junctionTable(
+          'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+          [['tableB_id' => 10], ['sort_order' => 1]]
+        );
+    }
+
+    public function testJunctionTableNonArrayRowThrows(): void {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("values[0] must be an array with a 'tableB_id' key");
+        $this->queryBuilder->junctionTable(
+          'tableA_to_tableB', 'tableA_id', 7, 'tableB_id',
+          [10]
+        );
+    }
+
 }

@@ -46,6 +46,7 @@ use function is_array;
  */
 class Historian {
     public static string $SessionNickKey = 'nick';
+    /** @noinspection PhpGetterAndSetterCanBeReplacedWithPropertyHooksInspection */
     protected array $ignoreDifferenceForFields = [
       'ultimo_cambio', 'ultimo_cambio_por',
       'last_changed', 'last_changed_by',
@@ -152,7 +153,7 @@ class Historian {
  * @throws Exception
      */
     public function getNLastChanges(array $primaryKeyValues, int $numEntries =  7 ):array {
-        return $this->getChanges($primaryKeyValues, 0, "LIMIT $numEntries");
+        return $this->getChanges($primaryKeyValues, 0, $numEntries);
     }
 
     /**
@@ -177,7 +178,7 @@ class Historian {
      * @return string HTML table representing the change's history.
      */
     public function changesAsHTML(array $changes): string {
-        $html = '<table class="laTabla">' . '<tbody>';
+        $html = '<table class="laTabla"><tbody>';
         foreach ($changes as $change) {
             if(empty($change['diff']))
                 continue;
@@ -249,7 +250,7 @@ class Historian {
     }
 
     /**
-     * Create changes table if it doesn't exist
+     * Create the history, audit or changes table if it doesn't exist
      * 
      * @return void
      * @throws Exception

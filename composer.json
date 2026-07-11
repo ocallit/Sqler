@@ -5,7 +5,8 @@
   "license": "MIT",
   "require": {
     "php": "^8.4",
-    "ext-mysqli": "*"
+    "ext-mysqli": "*",
+    "ext-bcmath": "*"
   },
   "autoload": {
     "psr-4": {

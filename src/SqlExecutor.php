@@ -72,33 +72,33 @@ class SqlExecutor {
     protected int $maxLogEntries = 256;
 
     // Database connection error constants
-    protected const ERROR_CANT_LOCK = 1015;
-    protected const ERROR_LOCK_ABORTED = 1689;
-    protected const ERROR_LOCK_WAIT_TIMEOUT = 1205;
-    protected const ERROR_LOCK_TABLE_FULL = 1206;
-    protected const ERROR_LOCK_DEADLOCK = 1213;
-    protected const ERROR_TRANSACTION_ROLLBACK = 1622;
-    protected const ERROR_XA_DEADLOCK = 1614;
-    protected const ERROR_SERVER_GONE = 2006;
-    protected const ERROR_SERVER_LOST = 2013;
-    protected const ERROR_PROBE_SLAVE_CONNECT = 2024;
-    protected const ERROR_PROBE_MASTER_CONNECT = 2025;
-    protected const ERROR_SSL_CONNECTION = 2026;
-    protected const ERROR_PACKET_TOO_LARGE = 2020;
+    protected const int ERROR_CANT_LOCK = 1015;
+    protected const int ERROR_LOCK_ABORTED = 1689;
+    protected const int ERROR_LOCK_WAIT_TIMEOUT = 1205;
+    protected const int ERROR_LOCK_TABLE_FULL = 1206;
+    protected const int ERROR_LOCK_DEADLOCK = 1213;
+    protected const int ERROR_TRANSACTION_ROLLBACK = 1622;
+    protected const int ERROR_XA_DEADLOCK = 1614;
+    protected const int ERROR_SERVER_GONE = 2006;
+    protected const int ERROR_SERVER_LOST = 2013;
+    protected const int ERROR_PROBE_SLAVE_CONNECT = 2024;
+    protected const int ERROR_PROBE_MASTER_CONNECT = 2025;
+    protected const int ERROR_SSL_CONNECTION = 2026;
+    protected const int ERROR_PACKET_TOO_LARGE = 2020;
 
     // Table and constraint error constants
-    protected const ERROR_TABLE_NOT_FOUND = 1146;
-    protected const ERROR_NO_SUCH_TABLE = 1051;
-    protected const ERROR_UNKNOWN_TABLE = 1109;
-    protected const ERROR_UNIQUE_VIOLATION = 1062;
-    protected const ERROR_PRIMARY_KEY_VIOLATION = 1022;
-    protected const ERROR_FOREIGN_KEY_VIOLATION = 1216;
-    protected const ERROR_FOREIGN_KEY_PARENT_NOT_FOUND = 1452;
-    protected const ERROR_FOREIGN_KEY_CHILD_EXISTS = 1451;
+    protected const int ERROR_TABLE_NOT_FOUND = 1146;
+    protected const int ERROR_NO_SUCH_TABLE = 1051;
+    protected const int ERROR_UNKNOWN_TABLE = 1109;
+    protected const int ERROR_UNIQUE_VIOLATION = 1062;
+    protected const int ERROR_PRIMARY_KEY_VIOLATION = 1022;
+    protected const int ERROR_FOREIGN_KEY_VIOLATION = 1216;
+    protected const int ERROR_FOREIGN_KEY_PARENT_NOT_FOUND = 1452;
+    protected const int ERROR_FOREIGN_KEY_CHILD_EXISTS = 1451;
     // bad column name
-    protected const ERROR_UNKNOWN_COLUMN = 1054;   // Unknown column 'column' in 'table'
-    protected const ERROR_BAD_FIELD = 1166;        // Incorrect column name 'column'
-    protected const ERROR_WRONG_FIELD_SPEC = 1063; // Incorrect column specifier for column
+    protected const int ERROR_UNKNOWN_COLUMN = 1054;   // Unknown column 'column' in 'table'
+    protected const int ERROR_BAD_FIELD = 1166;        // Incorrect column name 'column'
+    protected const int ERROR_WRONG_FIELD_SPEC = 1063; // Incorrect column specifier for column
 
     /**
      * $retryOnErrors
@@ -163,6 +163,7 @@ class SqlExecutor {
 
     public string $lastPreparedQuery = "";
 
+    /** @noinspection PhpGetterAndSetterCanBeReplacedWithPropertyHooksInspection */
     protected array $log = [];
     protected array $logError = [];
 
@@ -189,8 +190,8 @@ class SqlExecutor {
       #[SensitiveParameter]
       array $connect,
         array $connect_options = [],
-        string $charset = 'utf8',
-        string $collation = 'utf8_unicode_ci',
+        string $charset = 'utf8mb4',  // 5.7 'utf8',
+        string $collation = 'utf8mb4_0900_ai_ci', // 5.7 'utf8_unicode_ci',
         int $flags = 0
     ) {
         $this->connect = array_merge($this->connect, $connect) ;
@@ -233,7 +234,7 @@ class SqlExecutor {
      * @return bool|array<int:array<string:mixed>>
      * @throws mysqli_sql_exception
      */
-    public function query(string|mysqli_stmt $query, array $parameters = []): bool|mysqli_result {
+    public function query(string|mysqli_stmt $query, array $parameters = []): bool|array {
         $result = $this->runSql($query, $parameters);
         if($result instanceof mysqli_result) {
             try {
@@ -258,7 +259,7 @@ class SqlExecutor {
     public function affected_rows():int {return $this->mysqli->affected_rows;}
 
     /**
-     * return value of first column in first row $default on not found
+     * return value of the first column in the first row $default on not found
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
@@ -340,7 +341,7 @@ class SqlExecutor {
     }
 
     /**
-     * Multi-dimensional array keyed by specified columns in $keys, the rest of the column sin a key:value array
+     * Multidimensional array keyed by specified columns in $keys, the rest of the column sin a key:value array
      *
      * @param string|mysqli_stmt $query
      * @param array $keys
@@ -408,16 +409,18 @@ class SqlExecutor {
      * For example, with a result set:
      * Row 1: ['A', 'B', 'Value1']
      * Row 2: ['A', 'C', 'Value2']
+     * Row 3: ['A', 'C', 'Value3']
      *
      * The result would be:
      * [
      *   'A' => [
      *     'B' => 'Value1',
-     *     'C' => 'Value2'
+     *     'C' => 'Value3'
      *   ]
      * ]
      * This method allows for a flexible structure where the last column can be a primitive sql type.
-     * Note: If multiple rows have the same key structure, later rows will overwrite earlier ones.
+     * IMPORTANT NOTE: If multiple rows have the same key structure, **later rows will overwrite earlier ones**
+     *                 Path $parameters is assumed unique! Compare the difference with method multiKeyValue
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
@@ -449,7 +452,7 @@ class SqlExecutor {
     }
 
     /**
-     * Multi-dimensional array using all but last TWO columns as keys,
+     * Multidimensional array using all but last TWO columns as keys,
      * next-to-last column as key, last column as value in an array
      *
      * Example with result set:
@@ -613,6 +616,7 @@ class SqlExecutor {
                 $modes[] = "WITH CONSISTENT SNAPSHOT";
             if ($readOnly)
                 $modes[] =  "READ ONLY";
+            $comment = SqlUtils::commentIt($comment);
             $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
             $this->insideTransaction = true;
         } catch (mysqli_sql_exception $e) {
@@ -624,7 +628,7 @@ class SqlExecutor {
     }
 
     /**
-     * Commit current transaction.
+     * Commit the current transaction.
      *
      * @param string|int $comment
      * @return void
@@ -632,6 +636,7 @@ class SqlExecutor {
      */
     public function commit(string|int $comment = ''): void {
         $result = true;
+        $comment = SqlUtils::commentIt($comment);
         try {
             $result = $this->runSql("COMMIT /*$comment*/");
         } finally {
@@ -650,6 +655,7 @@ class SqlExecutor {
      */
     public function rollback(string|int $comment = ''): void {
         $result = false;
+        $comment = SqlUtils::commentIt($comment);
         try {
             $result = $this->runSql("ROLLBACK /*$comment*/");
         } finally {
@@ -798,22 +804,6 @@ class SqlExecutor {
         }
     }
 
-    public function __destruct() {
-        try {
-            if($this->mysqli instanceof mysqli)
-                $this->mysqli->query("COMMIT");
-            $this->closeConnection();
-        } catch (Throwable $e) {
-            $this->logErrorAdd(
-              $e->getCode(),
-              "Error during connection close in destructor: " . $e->getMessage(),
-              "",
-              [],
-              0
-            );
-        }
-    }
-
     /**
      * @param string|mysqli_stmt $query
      * @param array $parameters
@@ -885,7 +875,10 @@ class SqlExecutor {
     protected function logErrorAdd(int $errorNumber, string $errorMessage, string|mysqli_stmt $query, array $parameters, $attempt):void {
         if(count($this->logError) > $this->maxLogEntries)
             return;
-        $template = SqlUtils::createQueryTemplate($query);
+        if($query instanceof mysqli_stmt)
+            $template = "Error $errorNumber from mysqli_stmt";
+        else
+            $template = SqlUtils::createQueryTemplate($query);
         $this->logError[$template] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt, "template" => $template];
     }
 

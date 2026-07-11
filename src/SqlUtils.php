@@ -3,12 +3,13 @@
 
 namespace Ocallit\Sqler;
 
+use \Stringable;
 use function explode;
 use function str_replace;
 use function chr;
 
 class SqlUtils {
-    const JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE;
+    const int JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE;
 
     /**
      * Changes a column name to a nice label or title
@@ -39,6 +40,16 @@ class SqlUtils {
         return implode('.', $protected);
     }
 
+    public static function sTrim(string|int|float|bool|null|Stringable $s):string {
+        if($s === NULL)
+            return '';
+        return trim( preg_replace('/\s\s+/', ' ', (string)$s));
+    }
+    public static function commentIt(string $comment):string {
+        if(empty($comment))
+            return "";
+        return  str_replace("*/", "*", $comment);
+    }
 
     /**
      * @pure
@@ -106,4 +117,5 @@ class SqlUtils {
 
         return $sql;
     }
+
 }
