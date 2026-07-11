@@ -166,6 +166,8 @@ class DatabaseMetadata {
 
     /** @var array<DbCacheKey, ForeignKeysByTable> */
     protected array $foreignKeys = [];
+    protected array $foreignKeysAll = [];
+    protected array $foreignKeysDeduced = [];
 
     /** @var array<DbCacheKey, CheckConstraintsByTable> */
     protected array $checkConstraints = [];
@@ -196,17 +198,18 @@ class DatabaseMetadata {
     }
 
     /**
-     * @param string $database
+     * @param string $database, empty the current database
      * @return PrimaryKeysByTable array<string TableName, array<primaryKeyColumn, primaryKeyColumn>>
      * @throws Exception
      */
     public function primaryKeys(string $database = ""): array {
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(empty($this->primaryKeys[$dbName])) {
-            $sql = "SELECT /*" . __METHOD__ . "*/ t.TABLE_NAME, c.COLUMN_NAME
-                FROM information_schema.TABLES t
-                    JOIN information_schema.KEY_COLUMN_USAGE c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
-                WHERE t.TABLE_SCHEMA = $dbName AND c.CONSTRAINT_NAME = 'PRIMARY'";
+            $sql = "
+            SELECT /*" . __METHOD__ . "*/ c.TABLE_NAME, c.COLUMN_NAME
+            FROM  information_schema.KEY_COLUMN_USAGE c
+            WHERE c.TABLE_SCHEMA = $dbName AND c.CONSTRAINT_NAME = 'PRIMARY'
+            ";
             foreach($this->sqlExecutor->array($sql) as $d)
                 $this->primaryKeys[$dbName][$d['TABLE_NAME']][$d['COLUMN_NAME']] = $d['COLUMN_NAME'];
         }
@@ -261,7 +264,7 @@ class DatabaseMetadata {
      * Get the column metadata for one table, keyed by the column name.
      *
      * @param string $tableName
-     * @param string $database
+     * @param string $database, empty the current database
      * @return TableColumnMap
      * @throws Exception
      */
@@ -269,9 +272,10 @@ class DatabaseMetadata {
         if(empty($tableName))
             return [];
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
-        if(!isset($this->tableColumns[$dbName][$tableName]))
+        if(!isset($this->tableColumns[$dbName][$tableName])) {
+            $method = __METHOD__;
             $this->tableColumns[$dbName][$tableName] = $this->sqlExecutor->arrayKeyed(
-              "SELECT
+              "SELECT /*$method*/
                         COLUMN_NAME AS name,
                         data_type,
                         COLUMN_TYPE AS Type, 
@@ -294,7 +298,40 @@ class DatabaseMetadata {
                     WHERE TABLE_SCHEMA = $dbName AND TABLE_NAME = ?
                     ORDER BY ORDINAL_POSITION", "name", [$tableName]
             );
+        }
         return $this->tableColumns[$dbName][$tableName];
+    }
+
+    /**
+     * Return only generated columns from table() metadata.
+     *
+     * The original column-name keys and ordinal order are preserved.
+     *
+     * @param TableColumnMap $columns Output from table()
+     * @return TableColumnMap
+     */
+    public function filterGeneratedColumns(array $columns): array {
+        return array_filter(
+          $columns,
+          static fn(array $column): bool => !empty($column['generation_expression'] ?? '')
+        );
+    }
+
+    /**
+     * Return only primary-key columns from table() metadata.
+     *
+     * Composite primary keys return all their columns.
+     * The original column-name keys and ordinal order are preserved.
+     *
+     * @param TableColumnMap $columns Output from table()
+     * @return TableColumnMap
+     */
+    public function filterPrimaryKeyColumns(array $columns): array {
+        return array_filter(
+          $columns,
+          static fn(array $column): bool =>
+            ($column['key_type'] ?? '') === 'PRI'
+        );
     }
 
     /**
@@ -302,7 +339,7 @@ class DatabaseMetadata {
      *
      * @param string $query
      * @param array<array-key, mixed> $parameters
-     * @param string $database
+     * @param string $database, empty the current database
      * @return array<string, QueryFieldMeta>
      * @throws Exception
      */
@@ -354,7 +391,7 @@ class DatabaseMetadata {
      * Get foreign key metadata for one table, keyed by the local column name.
      *
      * @param string $tableName
-     * @param string $database
+     * @param string $database, empty the current database
      * @return ForeignKeyMap [column_name => ['referenced_table' => string, 'referenced_column' => string]]
      * @throws Exception
      */
@@ -390,13 +427,14 @@ class DatabaseMetadata {
     /**
      * Get all foreign key relationships in the selected database, grouped in multiple navigation maps.
      *
-     * @param string $database
+     * @param string $database, empty the current database
      * @return ForeignKeysAllMeta ['referencedBy' => $children, 'references' => $parents, 'foreign_keys' => $foreignKeys]
      * @throws Exception
      */
     public function foreignKeysAll(string $database = ""): array {
-        //@ToDo not cached!
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
+        if(!empty($this->foreignKeysAll[$dbName]))
+            return $this->foreignKeysAll[$dbName];
         $parents = [];
         $children = [];
         $foreignKeys = [];
@@ -452,9 +490,53 @@ class DatabaseMetadata {
             $foreignKeys[$constraintName]['referenced_column'][] =
               $row['referenced_column'];
         }
-        return ['referencedBy' => $children, 'references' => $parents, 'foreign_keys' => $foreignKeys];
+        return $this->foreignKeysAll[$dbName] = ['referencedBy' => $children, 'references' => $parents, 'foreign_keys' => $foreignKeys];
     }
 
+    /**
+     * foreign by naming columns: a column named {tableName}_id is a) in the table with the same name the primary key
+     *    (single column primary key) or b) in another table a, single column, foreign key to tableName Audit report
+     * list all names that according to the naming conventions should be a foreign key so a code review may check if
+     *    there is a foreign key constraint declared and if not why not
+     * 
+     * @param string $database, empty the current database, empty the current database
+     * @return array<tableName:[columnName: [referenced_table_exists => 'Yes' | 'No', has_foreign_key_constraint => 'Yes' | 'No', existing_constraint_name => string, ...]]>
+     */
+    public function foreignKeysNamed(string $database = ""):array {
+        $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
+        if(!empty($this->foreignKeysDeduced[$dbName]))
+            return $this->foreignKeysDeduced[$dbName];
+        $sql = "
+            SELECT
+                c.TABLE_NAME AS 'table_name',
+                c.COLUMN_NAME AS 'column_name',
+                LEFT(c.COLUMN_NAME, CHAR_LENGTH(c.COLUMN_NAME) - 3) AS 'referenced_table',
+                IF(expected.TABLE_NAME IS NULL, 'No', 'Yes') AS 'referenced_table_exists',
+                IF(kcu.CONSTRAINT_NAME IS NULL, 'No', 'Yes') AS 'has_foreign_key_constraint',
+                kcu.CONSTRAINT_NAME AS 'existing_constraint_name'
+            FROM information_schema.COLUMNS c
+            -- 1. Ensure we only audit actual tables, not views
+                     JOIN information_schema.TABLES parent_table
+                          ON c.TABLE_NAME = parent_table.TABLE_NAME
+                              AND c.TABLE_SCHEMA = parent_table.TABLE_SCHEMA
+                              AND parent_table.TABLE_TYPE = 'BASE TABLE'
+            -- 2. See if a table exists that matches the expected naming convention
+                     LEFT JOIN information_schema.TABLES expected
+                               ON expected.TABLE_NAME = LEFT(c.COLUMN_NAME, CHAR_LENGTH(c.COLUMN_NAME) - 3)
+                                   AND expected.TABLE_SCHEMA = c.TABLE_SCHEMA
+            -- 3. Check if an actual foreign key constraint exists for this specific column
+                     LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu
+                               ON c.TABLE_NAME = kcu.TABLE_NAME
+                                   AND c.COLUMN_NAME = kcu.COLUMN_NAME
+                                   AND c.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                                   AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+            WHERE c.TABLE_SCHEMA = $dbName
+              AND c.COLUMN_NAME LIKE '%\_id'
+              -- 4. Exclude the primary key of the table itself
+              AND c.TABLE_NAME <> LEFT(c.COLUMN_NAME, CHAR_LENGTH(c.COLUMN_NAME) - 3);
+        ";
+        return $this->foreignKeysDeduced[$dbName] = $this->sqlExecutor->multiKey($sql,['table_name','column_name']);
+    }
 
     /**
      * Get check constraints for a table, indexed by column name.
@@ -462,7 +544,7 @@ class DatabaseMetadata {
      * Constraints may reference multiple columns; they will appear under each referenced column.
      *
      * @param string $tableName
-     * @param string $database
+     * @param string $database, empty the current database
      * @return CheckConstraintList array [column_name => [constraint_name => check_clause, ...]]
      */
     public function getCheckConstraints(string $tableName, string $database = ""): array {
@@ -491,7 +573,7 @@ class DatabaseMetadata {
      *
      * @param string $tableName
      * @param string $columnName
-     * @param string $database
+     * @param string $database, empty the current database
      * @return OptionMap array [value => label, ...]
      * @throws Exception
      */
@@ -546,7 +628,7 @@ class DatabaseMetadata {
      *
      * @param string $referencedTable
      * @param string $referencedColumn
-     * @param string $database
+     * @param string $database, empty the current database
      * @return OptionMap [id => label, ...] sorted by label
      * @throws Exception
      */
