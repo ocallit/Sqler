@@ -9,7 +9,7 @@ use function str_replace;
 use function chr;
 
 class SqlUtils {
-    const int JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE;
+    const int JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_BIGINT_AS_STRING;
 
     /**
      * Changes a column name to a nice label or title
@@ -58,6 +58,7 @@ class SqlUtils {
     public static function strIt(string|null $str): string {
         if($str === NULL)
             return 'NULL';
+        if($str === '0') return "'0'";
         return empty($str) ? "''" :
           "'" . str_replace(["\\", chr(8), chr(0), chr(26), chr(27)],
             ["\\\\", '', '', '', ''],

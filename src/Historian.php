@@ -134,8 +134,23 @@ class Historian {
             WHERE `pk` = ?
             ORDER BY `date` DESC, history_id DESC LIMIT ?, ?";
 
-        return
-          $this->diff($this->sqlExecutor->arrayKeyed($sql, 'history_id', $params));
+        $history = $this->sqlExecutor->arrayKeyed($sql, 'history_id', $params);
+        return $this->diff($history);
+    }
+
+    /** Normalize decoded string values to NFC, including values in nested records. */
+    protected function normalizeRecordText(array $record): array {
+        foreach($record as $key => $value) {
+            if(is_array($value)) {
+                $record[$key] = $this->normalizeRecordText($value);
+            } elseif(is_string($value)) {
+                $normalized = \Normalizer::normalize($value, \Normalizer::FORM_C);
+                if($normalized === false)
+                    throw new \UnexpectedValueException('History record contains invalid Unicode text.');
+                $record[$key] = $normalized;
+            }
+        }
+        return $record;
     }
 
     /**
@@ -174,6 +189,9 @@ class Historian {
     }
 
     /**
+     *  Renders trusted HTML. Callers must escape or sanitize every supplied value before rendering.
+     *  HTML is intentionally not escaped here; upstream code owns that responsibility.
+     *
      * @param array $changes
      * @return string HTML table representing the change's history.
      */
@@ -225,13 +243,22 @@ class Historian {
             return [];
 
         $diff = [];
-        for($i = 0; $i < $count; ++$i) {
+        for($i = 0; $i < $count - 1; ++$i) {
+            // Decode each record once, when it first participates in a comparison.
+            foreach($i === 0 ? [0, 1] : [$i + 1] as $index) {
+                $record = json_decode(
+                    json: $records[$index]['record'],
+                    associative: true,
+                    flags: JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING
+                );
+                if(!is_array($record))
+                    throw new \UnexpectedValueException('History record must decode to an array.');
+                $records[$index]['record'] = $this->normalizeRecordText($record);
+            }
             $current = $records[$i];
-            $older = $records[$i + 1] ?? null;
+            $older = $records[$i + 1];
 
-            $differ = ($older !== null)
-              ? $this->differ($older['record'], $current['record'])
-              : [];
+            $differ = $this->differ($older['record'], $current['record']);
 
             if(empty($differ))
                 continue;

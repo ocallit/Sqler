@@ -19,7 +19,7 @@ use function is_array;
  * - where($conditions, $conjunction='AND', $comment='')
  *
  * Magic values (not parameterized): NOW(), CURDATE(), CURRENT_TIMESTAMP, UUID(), etc.
- * Where arrays: scalar → '=?', array → 'IN (?,...)'
+ * Where arrays: null → 'IS NULL', other scalar → '=?', array → 'IN (?,...)'
  * Auto-skipped on duplicate: alta_db, alta_por, registered, registered_by
  */
 
@@ -53,7 +53,7 @@ class QueryBuilder {
      * @param string $table
      * @param array $array
      * @param bool $onDuplicateKeyUpdate
-     * @param array $onDuplicateKeyDontUpdate
+     * @param array $onDuplicateKeyDontUpdate Column names as a list, or as keys (associated values ignored).
      * @param array $onDuplicateKeyOverride
      * @param string $comment
      * @return array
@@ -62,6 +62,8 @@ class QueryBuilder {
            bool $onDuplicateKeyUpdate = false, array $onDuplicateKeyDontUpdate = [],array $onDuplicateKeyOverride = [],
            string $comment = ''
     ):array {
+        if(array_is_list($onDuplicateKeyDontUpdate))
+            $onDuplicateKeyDontUpdate = array_fill_keys($onDuplicateKeyDontUpdate, true);
         $columns = [];
         $values = [];
         $parameters = [];
@@ -89,7 +91,8 @@ class QueryBuilder {
             " INTO " . SqlUtils::fieldIt($table) . "(" . implode(",", $columns) . ") " .
             " VALUES(" . implode(",", $values) . ")";
         if(!empty($onDuplicateKey)) {
-            $insert .= "  as new ON DUPLICATE KEY UPDATE " . implode(",", $onDuplicateKey);
+            $insert .= ($this->useNewOnDuplicate ? "  as new" : "") .
+                " ON DUPLICATE KEY UPDATE " . implode(",", $onDuplicateKey);
         }
         return ["query" => $insert, "parameters" => $parameters];
     }
@@ -137,7 +140,9 @@ class QueryBuilder {
         $parameters = [];
         foreach($array as $columnName => $value) {
             $col = SqlUtils::fieldIt($columnName);
-            if(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
+            if($value === null) {
+                $clause[] = "$col IS NULL";
+            } elseif(is_string($value) && array_key_exists($value, $this->dontQuoteValue)) {
                 $clause[] = "$col=$value";
             } elseif(is_array($value)) {
                 $inClause = [];

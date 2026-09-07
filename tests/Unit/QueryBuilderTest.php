@@ -6,6 +6,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use Ocallit\Sqler\QueryBuilder;
 
 
+require_once __DIR__ . '/../../vendor/autoload.php';
 
 #[CoversClass(QueryBuilder::class)]
 class QueryBuilderTest extends TestCase {
@@ -295,7 +296,9 @@ class QueryBuilderTest extends TestCase {
     }
 
     public static function junctionTableProvider(): array {
-        $c = '/*Ocallit\Sqler\QueryBuilder::junctionTable*/';
+        // Outer statements identify the caller; the WHERE identifies junctionTable.
+        $c = '/*QueryBuilderTest::testJunctionTable*/';
+        $whereComment = '/*Ocallit\Sqler\QueryBuilder::junctionTable*/';
         return [
           'delete_first_then_one_upsert_per_row_in_input_order' => [
             'tableA_to_tableB', 'tableA_id', 'A-1', 'tableB_id',
@@ -306,7 +309,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  $whereComment (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
                 'parameters' => ['A-1', 10, 20],
               ],
               [
@@ -327,7 +330,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?)",
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  $whereComment (`tableA_id`=?)",
                 'parameters' => [7],
               ],
             ],
@@ -338,7 +341,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  $whereComment (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
                 'parameters' => [7, 10],
               ],
               [
@@ -355,7 +358,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `user_to_role` WHERE  (`user_id`=?) AND `role_id` NOT IN (?)",
+                'query' => "DELETE $c FROM `user_to_role` WHERE  $whereComment (`user_id`=?) AND `role_id` NOT IN (?)",
                 'parameters' => [5, 1],
               ],
               [
@@ -371,7 +374,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
+                'query' => "DELETE $c FROM `tableA_to_tableB` WHERE  $whereComment (`tableA_id`=?) AND `tableB_id` NOT IN (?,?)",
                 'parameters' => [7, 10, 10],
               ],
               [
@@ -392,7 +395,7 @@ class QueryBuilderTest extends TestCase {
             '/*myC*/',
             [
               [
-                'query' => "DELETE /*myC*/ FROM `t` WHERE  (`a`=?) AND `b` NOT IN (?)",
+                'query' => "DELETE /*myC*/ FROM `t` WHERE  $whereComment (`a`=?) AND `b` NOT IN (?)",
                 'parameters' => [1, 2],
               ],
               [
@@ -408,7 +411,7 @@ class QueryBuilderTest extends TestCase {
             '',
             [
               [
-                'query' => "DELETE $c FROM `mydb`.`tableA_to_tableB` WHERE  (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
+                'query' => "DELETE $c FROM `mydb`.`tableA_to_tableB` WHERE  $whereComment (`tableA_id`=?) AND `tableB_id` NOT IN (?)",
                 'parameters' => [7, 10],
               ],
               [

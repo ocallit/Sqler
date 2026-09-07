@@ -62,7 +62,7 @@ class SqlExecutor {
 
     protected array $connectOptions = [
       MYSQLI_INIT_COMMAND => 'SET AUTOCOMMIT = 1',
-        //    'MYSQLI_OPT_CONNECT_TIMEOUT' => 10,
+        //    MYSQLI_OPT_CONNECT_TIMEOUT => 10,
     ];
 
     protected int $flags = 0;
@@ -166,6 +166,8 @@ class SqlExecutor {
     /** @noinspection PhpGetterAndSetterCanBeReplacedWithPropertyHooksInspection */
     protected array $log = [];
     protected array $logError = [];
+    // Error reported by the latest operation, independent of mysqli cleanup state.
+    protected int $lastErrorNumber = 0;
 
     /**
      * Physical transaction state.
@@ -195,7 +197,7 @@ class SqlExecutor {
         int $flags = 0
     ) {
         $this->connect = array_merge($this->connect, $connect) ;
-        $this->connectOptions = array_merge($this->connectOptions, $connect_options);
+        $this->connectOptions = array_replace($this->connectOptions, $connect_options);
         $this->charset = $charset;
         $this->collation = $collation;
         $this->flags = $flags;
@@ -268,6 +270,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function firstValue(string|mysqli_stmt $query, array $parameters = [], string|null|bool $default = ""):string|null|bool {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -288,6 +291,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -309,6 +313,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function arrayKeyed(string|mysqli_stmt $query, string $key, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -330,6 +335,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -351,6 +357,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -380,6 +387,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -429,6 +437,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
+       $this->lastErrorNumber = 0;
        if(empty($query))
            return $default;
         try {
@@ -439,11 +448,11 @@ class SqlExecutor {
                 $r = &$ret;
                 for($iField = 0; $iField < $keyedFields; ++$iField) {
                     $key = $tmp[$iField];
-                    if(!array_key_exists($key, $ret))
+                    if(!array_key_exists($key, $r))
                         $r[$key] = [];
                     $r = &$r[$key];
                 }
-                $r[] = $tmp[$keyedFields];
+                $r = $tmp[$keyedFields];
             }
             return empty($ret) ? $default : $ret;
         } finally {
@@ -477,6 +486,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -526,6 +536,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function keyValue(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -546,6 +557,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function vector(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $default;
         try {
@@ -565,6 +577,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function result(string|mysqli_stmt $query, array $parameters = []): mysqli_result|bool {
+        $this->lastErrorNumber = 0;
         if(empty($query))
             return $this->runSql("SELECT /*" . __METHOD__ . "*/ NULL FROM DUAL LIMIT 0");
         return $this->runSql($query, $parameters);
@@ -579,6 +592,7 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
+        $this->lastErrorNumber = 0;
         $attempts = 0;
         /** @var mysqli_sql_exception|null $astError */
         $lastError = null;
@@ -588,6 +602,7 @@ class SqlExecutor {
                     foreach($queries as $query)
                         $this->query($query);
                     $this->commit($comment);
+                    $this->lastErrorNumber = 0;
                     return;
             } catch(mysqli_sql_exception $e) {
                 /** @var mysqli_sql_exception $lastError */
@@ -595,7 +610,10 @@ class SqlExecutor {
                 $this->rollback($comment);
             }
         }
-        throw $lastError ?? new mysqli_sql_exception("Transaction failed after $attempts attempts");
+        $lastError ??= new mysqli_sql_exception("Transaction failed after $attempts attempts");
+        // A successful ROLLBACK clears connection errno, but not the failure we report.
+        $this->lastErrorNumber = $lastError->getCode();
+        throw $lastError;
     }
 
     /**
@@ -665,16 +683,13 @@ class SqlExecutor {
     }
 
     /**
-     * return mysqli->errno or 0
+     * Return the last reported SQL error code, or 0 after a successful operation.
      *
      * @pure
      * @return int
      */
     public function getLastErrorNumber(): int {
-        try {
-            if(!$this->mysqli) return 0;
-            return $this->mysqli->errno ?? 0;
-        } catch(Throwable $e) {return 0;}
+        return $this->lastErrorNumber;
     }
 
     /**
@@ -684,9 +699,9 @@ class SqlExecutor {
      * @return bool True if the last error was a table not found error
      */
     public function is_last_error_table_not_found(): bool {
-        if(!$this->mysqli) return false;
 
-        return in_array($this->mysqli->errno, [
+
+        return in_array($this->lastErrorNumber, [
           SqlExecutor::ERROR_TABLE_NOT_FOUND,
           SqlExecutor::ERROR_NO_SUCH_TABLE,
           SqlExecutor::ERROR_UNKNOWN_TABLE
@@ -700,9 +715,9 @@ class SqlExecutor {
      * @return bool True if the last error was a duplicate key error
      */
     public function is_last_error_duplicate_key(): bool {
-        if(!$this->mysqli) return false;
 
-        return in_array($this->mysqli->errno, [
+
+        return in_array($this->lastErrorNumber, [
           SqlExecutor::ERROR_UNIQUE_VIOLATION,
           SqlExecutor::ERROR_PRIMARY_KEY_VIOLATION
         ], true);
@@ -715,9 +730,9 @@ class SqlExecutor {
      * @return bool True if the last error was a foreign key violation
      */
     public function is_last_error_invalid_foreign_key(): bool {
-        if(!$this->mysqli) return false;
 
-        return in_array($this->mysqli->errno, [
+
+        return in_array($this->lastErrorNumber, [
           SqlExecutor::ERROR_FOREIGN_KEY_VIOLATION,
           SqlExecutor::ERROR_FOREIGN_KEY_PARENT_NOT_FOUND
         ], true);
@@ -730,9 +745,9 @@ class SqlExecutor {
      * @return bool True if the last error was due to existing child records
      */
     public function is_last_error_child_records_exist(): bool {
-        if(!$this->mysqli) return false;
 
-        return $this->mysqli->errno === SqlExecutor::ERROR_FOREIGN_KEY_CHILD_EXISTS;
+
+        return $this->lastErrorNumber === SqlExecutor::ERROR_FOREIGN_KEY_CHILD_EXISTS;
     }
     
     /**
@@ -742,9 +757,9 @@ class SqlExecutor {
      * @return bool True if the last error was a column not found error
      */
     public function is_last_error_column_not_found(): bool {
-        if(!$this->mysqli) return false;
 
-        return in_array($this->mysqli->errno, [
+
+        return in_array($this->lastErrorNumber, [
           SqlExecutor::ERROR_UNKNOWN_COLUMN,
           SqlExecutor::ERROR_BAD_FIELD,
           SqlExecutor::ERROR_WRONG_FIELD_SPEC
@@ -811,6 +826,19 @@ class SqlExecutor {
      * @throws mysqli_sql_exception
      */
     protected function runSql(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
+        $this->lastErrorNumber = 0;
+        try {
+            $result = $this->executeSql($query, $parameters);
+            $this->lastErrorNumber = $result === false ? ($this->mysqli->errno ?? 0) : 0;
+            return $result;
+        } catch(mysqli_sql_exception $error) {
+            $this->lastErrorNumber = $error->getCode();
+            throw $error;
+        }
+    }
+
+    /** Execute SQL with retries; runSql owns the final reported error state. */
+    protected function executeSql(string|mysqli_stmt $query, array $parameters = []):bool|mysqli_result {
         if(empty($this->mysqli))
             $this->connect();
         $this->logAdd($query, $parameters);
@@ -830,6 +858,7 @@ class SqlExecutor {
                 $query->store_result();
                 return $result;
             } catch(mysqli_sql_exception $error) {
+                $this->lastErrorNumber = $error->getCode();
                 $this->logErrorAdd($error->getCode(), $error->getMessage(), $query, $parameters, $attempts);
                 if(!$this->retryQuery($error->getCode()))
                     throw $error;

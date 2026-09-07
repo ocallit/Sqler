@@ -5,7 +5,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\CoversClass;
 use Ocallit\Sqler\SqlUtils;
 
-
+require_once __DIR__ . '/../../vendor/autoload.php';
 
 #[CoversClass(SqlUtils::class)]
 class SqlUtilsTest extends TestCase {
