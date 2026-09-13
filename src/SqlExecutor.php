@@ -30,7 +30,7 @@ use function usleep;
  * - keyValue($q, $p): [key => val, ...]
  * - multiKey($q, $keys, $p): nested by named keys
  * - multiKeyN($q, $n, $p): nested by first N cols
- * - multiKeyLast($q, $p): nested, last col as value
+ * - multiKeyLast($q, $p): nested, last col as value, it replaces duplicated values with the last value
  * - multiKeyValue($q, $p): nested, last col accumulated
  */
 
