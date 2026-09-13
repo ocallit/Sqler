@@ -28,7 +28,7 @@ use function usleep;
  * - arrayKeyed($q, $key, $p): [keyVal => [col => val]]
  * - vector($q, $p): [val1, val2, ...]
  * - keyValue($q, $p): [key => val, ...]
- * - multiKey($q, $keys, $p): nested by named keys
+ * - multiKey($q, $keys, $p): nested by named keys makes array on multiple values
  * - multiKeyN($q, $n, $p): nested by first N cols
  * - multiKeyLast($q, $p): nested, last col as value, it replaces duplicated values with the last value
  * - multiKeyValue($q, $p): nested, last col accumulated
