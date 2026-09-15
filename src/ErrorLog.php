@@ -29,8 +29,8 @@ use function substr;
  *
  * Collecting:
  *   ErrorLog::throwable($e)                 catched Throwable
- *   ErrorLog::domain($message, $code)       business rule worthy of a record
- *   ErrorLog::info($message, $code)         anything else worth a record
+ *   ErrorLog::domain($message, $code)       business rule broken by the code
+ *   ErrorLog::info($message, $code)         trace left to debug
  *   ErrorLog::javascriptErrors($array)      rows posted by the javascript error api
  *   ErrorLog::sqlErrorLog($sql->getErrorLog())
  *
@@ -166,7 +166,9 @@ class ErrorLog {
     }
 
     /**
-     * Adds a domain or business rule worthy of a record
+     * Adds a domain error: a business rule broken by the code, never by user input,
+     * a defect the code caught instead of crashing. Invalid user input is validation,
+     * it is rejected and shown to the user, it is not logged here.
      *
      * @param string $errorMessage
      * @param int|string $errorCode business rule code
@@ -178,7 +180,8 @@ class ErrorLog {
     }
 
     /**
-     * Adds an informative record
+     * Adds a trace the developer places to help debug, to be deleted from the code, or
+     * closed here, once it has served its purpose
      *
      * @param string $errorMessage
      * @param int|string $errorCode
@@ -450,8 +453,8 @@ class ErrorLog {
             `last_seen` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'When this error template was last encountered',
             `seen_count` MEDIUMINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Number of times this error template has occurred',
 
-            `status` ENUM('Bug', 'Fixed', 'Won''t Fix') NOT NULL DEFAULT 'Bug' COMMENT 'Error resolution status',
-            `error_type` ENUM('SQL', 'PHP', 'JS', 'Domain', 'Info') NOT NULL COMMENT 'Type of error for categorization',
+            `status` ENUM('Bug', 'Fixed', 'Won''t Fix') NOT NULL DEFAULT 'Bug' COMMENT 'Resolution status, every error_type starts as Bug and stays until closed as Fixed, or as Won''t Fix to keep it out of the pending list for good. A new occurrence returns Fixed to Bug, it does not touch Won''t Fix',
+            `error_type` ENUM('SQL', 'PHP', 'JS', 'Domain', 'Info') NOT NULL COMMENT 'What raised it. SQL, PHP, JS: runtime errors. Domain: a business rule broken by the code, never by user input, a defect the code caught instead of crashing, invalid user input is validation and is not logged here. Info: a trace the developer placed to help debug, deleted from the code, or closed here, once it has served its purpose',
             `error_code` VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'Error code (errno, SQL error code, HTTP status, etc.)',
             `error_message` MEDIUMTEXT COMMENT 'Original error message',
             `content` MEDIUMTEXT COMMENT 'Original error content, extra info (query, message, stack trace, etc.)',
