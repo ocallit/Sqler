@@ -228,6 +228,10 @@ class SqlExecutor {
         throw new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
     }
 
+    public function execute(string|mysqli_stmt $query, array $parameters = []): bool|array {
+        return $this->runSql($query, $parameters);
+    }
+
     /**
      *
      *
