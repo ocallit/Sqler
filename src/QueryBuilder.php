@@ -122,8 +122,9 @@ class QueryBuilder {
         $comment = $this->commentIt($comment);
 
         $whereArray = $this->where($where);
+        $whereClause = empty($whereArray['query']) ? "" : " WHERE $whereArray[query]";
         $update = "UPDATE $comment " . SqlUtils::fieldIt($table) . " SET " . implode(",", $set) .
-          " WHERE $whereArray[query]";
+          $whereClause;
         return ["query" => $update, "parameters" => array_merge($parameters, $whereArray['parameters']) ];
     }
 
@@ -133,9 +134,11 @@ class QueryBuilder {
      *
      */
     public function where(array $array, string $conjunction = "AND", string $comment = ""):array {
-        $comment = $this->commentIt($comment);
         if(empty($array))
-            return ["query" => " $comment ", "parameters" => []];
+            return ["query" => "", "parameters" => []];
+        if(!empty($comment))
+            $comment = $this->commentIt($comment);
+
         $clause = [];
         $parameters = [];
         foreach($array as $columnName => $value) {

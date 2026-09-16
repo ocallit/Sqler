@@ -36,7 +36,6 @@ use function substr;
  *
  * Fixing:
  *   ErrorLog::fix($errorHash, 'what was done')  status Fixed, fixed=NOW(), fixed_times+1
- *   last_seen > fixed means the error came back after that fix
  *
  * Only the first ErrorLog::$maxPerType distinct hashes of each error type are kept, repeats of
  * a kept hash only increment seen_count. The hash is xxh3 of file|line|error_type|error_code,
