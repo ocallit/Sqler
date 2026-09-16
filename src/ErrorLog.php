@@ -1,10 +1,11 @@
-<?php
+<?php /** @noinspection PhpPipeOperatorCanBeUsedInspection */
 /** @noinspection PhpUnused */
 /** @noinspection SqlNoDataSourceInspection */
 
 namespace Ocallit\Sqler;
 
 use Throwable;
+use Stringable;
 use function array_key_exists;
 use function array_keys;
 use function array_diff;
@@ -21,28 +22,27 @@ use function substr;
  * ErrorLog Quick Reference:
  *
  * Setup, once, as early as possible:
- *   ErrorLog::initialize($sqlExecutor, $userNick);              // table error_log
- *   ErrorLog::initialize($sqlExecutor, $userNick, 'app_error'); // other table
+ *   ErrorLog::initialize($sqlExecutor, $userNick); // table error_log
  *
  * Registers the error handler, chaining any previously registered one, and a shutdown
  * function that adds php/json/preg last error and writes everything to the database.
  *
  * Collecting:
- *   ErrorLog::throwable($e)                 catched Throwable
- *   ErrorLog::domain($message, $code)       business rule broken by the code
- *   ErrorLog::info($message, $code)         trace left to debug
- *   ErrorLog::javascriptErrors($array)      rows posted by the javascript error api
+ *   ErrorLog::log($e) caught Throwable
+ *   ErrorLog::log($message, "") business rule broken by the code
+ *   ErrorLog::log($message, "Info) trace left to debug
+ *   ErrorLog::javascriptErrors($array) rows posted by the JavaScript error api
  *   ErrorLog::sqlErrorLog($sql->getErrorLog())
  *
  * Fixing:
- *   ErrorLog::fix($errorHash, 'what was done')  status Fixed, fixed=NOW(), fixed_times+1
+ *   ErrorLog::fix($errorHash, 'what was done') status Fixed, fixed=NOW(), fixed_times+1
  *
  * Only the first ErrorLog::$maxPerType distinct hashes of each error type are kept, repeats of
- * a kept hash only increment seen_count. The hash is xxh3 of file|line|error_type|error_code,
+ * a kept hash increment seen_count. The hash is xxh3 of file|line|error_type|error_code,
  * of the query template for SQL errors, 0 when there is no line number.
- * On a repeat last_seen, seen_count, user_nick, user_agent and request_uri are refreshed and
+ * On a repeat last_seen, seen_count, user_nick, user_agent, and request_uri are refreshed, and
  * status goes back to Bug unless it is Won't Fix, everything else keeps the first occurrence.
- * Creates the error_log table automatically on first write.
+ * Creates the error_log table automatically on the first insert.
  */
 class ErrorLog {
     public const string TYPE_PHP = 'PHP';
@@ -68,7 +68,7 @@ class ErrorLog {
 
     protected static mixed $previousErrorHandler = null;
     protected static bool $isRegistered = false;
-    protected static bool $isFlushing = false;
+    protected static bool $isSaving = false;
     protected static bool $isTableCreated = false;
 
     /**
@@ -90,6 +90,112 @@ class ErrorLog {
         self::$previousErrorHandler = set_error_handler([self::class, 'errorHandler']);
         register_shutdown_function([self::class, 'shutdownHandler']);
     }
+
+    /**
+     * Generic log method: logs a Throwable, or logs a message as domain or info
+     *
+     * @param Throwable|string|Stringable $error
+     * @param string $type
+     * @return void
+     */
+    public static function log(Throwable|string|Stringable $error, string $type = 'info'): void {
+        if($error instanceof Throwable) {
+            self::throwable($error);
+            return;
+        }
+        if(strcasecmp($type, 'domain') === 0 || $type === self::TYPE_DOMAIN) {
+            self::domain((string)$error);
+            return;
+        }
+        self::info((string)$error);
+    }
+
+    /**
+     * Adds the JavaScript errors collected by an api
+     *
+     * @param array $errors [ ['file'=>, 'line_number'=>, 'column_number'=>, 'error_code'=>, 'error_message'=>,
+     *   'function_name'=>, 'content'=>, 'request_uri'=>, 'user_agent'=>], ... ]
+     *   line, column, message, stack and url also accepted
+     * @return void
+     */
+    public static function javascriptErrors(array $errors): void {
+        foreach($errors as $error) {
+            if(!is_array($error))
+                continue;
+            $file = (string)($error['file'] ?? $error['filename'] ?? '');
+            $lineNumber = (int)($error['line_number'] ?? $error['line'] ?? 0);
+            $errorCode = $error['error_code'] ?? $error['code'] ?? '';
+            self::add(self::TYPE_JS, self::hashIt($file, $lineNumber, self::TYPE_JS, $errorCode), [
+              'error_code' => $errorCode,
+              'error_message' => (string)($error['error_message'] ?? $error['message'] ?? ''),
+              'file' => $file,
+              'line_number' => $lineNumber,
+              'column_number' => (int)($error['column_number'] ?? $error['column'] ?? 0),
+              'function_name' => (string)($error['function_name'] ?? $error['function'] ?? ''),
+              'content' => (string)($error['content'] ?? $error['stack'] ?? ''),
+              'request_uri' => (string)($error['request_uri'] ?? $error['url'] ?? self::requestUri()),
+              'user_agent' => (string)($error['user_agent'] ?? self::server('HTTP_USER_AGENT')),
+            ]);
+        }
+    }
+
+    /**
+     * Adds the error log of a SqlExecutor, SqlExecutor::getErrorLog()
+     *
+     * @param array $sqlErrorLog [ template => ['error'=>, 'error message'=>, 'query'=>, 'parameters'=>, 'attempt'=>, 'template'=>] ]
+     * @return void
+     */
+    public static function sqlErrorLog(array $sqlErrorLog): void {
+        foreach($sqlErrorLog as $hash => $error) {
+            if(!is_array($error))
+                continue;
+            $template = (string)($error['template'] ?? '');
+            $query = is_string($error['query'] ?? '') ? $error['query'] : $template;
+            $parameters = is_array($error['parameters'] ?? []) ? $error['parameters'] : [];
+            if(!empty($parameters))
+                $query .= PHP_EOL ." -- (" . implode(", ", $parameters) . ")";
+            $stackTrace = is_array($error['stack_trace'] ?? null) ? $error['stack_trace'] : ($error['stack trace'] ?? []);
+            $caller = is_array($stackTrace[0] ?? null) ? $stackTrace[0] : [];
+            self::add(self::TYPE_SQL, $hash, [
+              'error_code' => $error['error'] ?? '',
+              'error_message' => (string)($error['error_message'] ?? ''),
+              'file' => (string)($caller['file'] ?? ''),
+              'line_number' => (int)($caller['line'] ?? 0),
+              'content' => $query,
+            ]);
+        }
+    }
+
+    /**
+     * Registers that an error was fixed, does not touch last_seen so last_seen > fixed
+     * means the error came back after this fix
+     *
+     * @param string $errorHash
+     * @param string $comment developer notes, keeps the stored one when empty
+     * @return void
+     */
+    public static function fix(string $errorHash, string $comment = ''): void {
+        if(self::$sqlExecutor === null)
+            return;
+        $table = SqlUtils::fieldIt(self::$table);
+        $method = __METHOD__;
+        $set = "`status`='Fixed',`fixed`=NOW(),`fixed_times`=`fixed_times`+1";
+        $parameters = [];
+        if($comment !== '') {
+            $set .= ",`comment`=?";
+            $parameters[] = self::text($comment, self::$maxTextLength);
+        }
+        $parameters[] = $errorHash;
+        try {
+            self::$sqlExecutor->query("UPDATE /* $method */ $table SET $set WHERE `error_hash`=?", $parameters);
+        } catch (Throwable) { }
+    }
+
+    /**
+     * @return array<string, array<string, mixed>> the errors collected so far, hash => error
+     * @pure
+     */
+    public static function getErrors(): array {return self::$errors;}
 
     /**
      * Registered error handler, stores the error and calls the previously registered handler
@@ -142,16 +248,17 @@ class ErrorLog {
               'error_message' => preg_last_error_msg(),
               'function_name' => 'preg_last_error',
             ]);
-        self::flush();
+        self::sqlErrorLog(self::$sqlExecutor->getErrorLog());
+        self::save();
     }
 
     /**
-     * Adds a catched Throwable
+     * Adds a caught Throwable
      *
      * @param Throwable $throwable
      * @return void
      */
-    public static function throwable(Throwable $throwable): void {
+    protected static function throwable(Throwable $throwable): void {
         $frame = $throwable->getTrace()[0] ?? [];
         self::add(self::TYPE_PHP,
           self::hashIt($throwable->getFile(), $throwable->getLine(), self::TYPE_PHP, $throwable->getCode()), [
@@ -174,7 +281,7 @@ class ErrorLog {
      * @param string $content extra information
      * @return void
      */
-    public static function domain(string $errorMessage, int|string $errorCode = '', string $content = ''): void {
+    protected static function domain(string $errorMessage, int|string $errorCode = '', string $content = ''): void {
         self::rule(self::TYPE_DOMAIN, $errorMessage, $errorCode, $content);
     }
 
@@ -187,103 +294,19 @@ class ErrorLog {
      * @param string $content extra information
      * @return void
      */
-    public static function info(string $errorMessage, int|string $errorCode = '', string $content = ''): void {
+    protected static function info(string $errorMessage, int|string $errorCode = '', string $content = ''): void {
         self::rule(self::TYPE_INFO, $errorMessage, $errorCode, $content);
     }
-
-    /**
-     * Adds the javascript errors collected by an api
-     *
-     * @param array $errors [ ['file'=>, 'line_number'=>, 'column_number'=>, 'error_code'=>, 'error_message'=>,
-     *   'function_name'=>, 'content'=>, 'request_uri'=>, 'user_agent'=>], ... ]
-     *   line, column, message, stack and url also accepted
-     * @return void
-     */
-    public static function javascriptErrors(array $errors): void {
-        foreach($errors as $error) {
-            if(!is_array($error))
-                continue;
-            $file = (string)($error['file'] ?? $error['filename'] ?? '');
-            $lineNumber = (int)($error['line_number'] ?? $error['line'] ?? 0);
-            $errorCode = $error['error_code'] ?? $error['code'] ?? '';
-            self::add(self::TYPE_JS, self::hashIt($file, $lineNumber, self::TYPE_JS, $errorCode), [
-              'error_code' => $errorCode,
-              'error_message' => (string)($error['error_message'] ?? $error['message'] ?? ''),
-              'file' => $file,
-              'line_number' => $lineNumber,
-              'column_number' => (int)($error['column_number'] ?? $error['column'] ?? 0),
-              'function_name' => (string)($error['function_name'] ?? $error['function'] ?? ''),
-              'content' => (string)($error['content'] ?? $error['stack'] ?? ''),
-              'request_uri' => (string)($error['request_uri'] ?? $error['url'] ?? self::requestUri()),
-              'user_agent' => (string)($error['user_agent'] ?? self::server('HTTP_USER_AGENT')),
-            ]);
-        }
-    }
-
-    /**
-     * Adds the error log of a SqlExecutor, SqlExecutor::getErrorLog()
-     *
-     * @param array $sqlErrorLog [ template => ['error'=>, 'error message'=>, 'query'=>, 'parameters'=>, 'attempt'=>, 'template'=>] ]
-     * @return void
-     */
-    public static function sqlErrorLog(array $sqlErrorLog): void {
-        foreach($sqlErrorLog as $template => $error) {
-            if(!is_array($error))
-                continue;
-            $template = (string)($error['template'] ?? $template);
-            $query = is_string($error['query'] ?? '') ? $error['query'] : $template;
-            $parameters = is_array($error['parameters'] ?? []) ? $error['parameters'] : [];
-            if(!empty($parameters))
-                $query .= " -- (" . implode(", ", $parameters) . ")";
-            self::add(self::TYPE_SQL, hash('xxh3', $template), [
-              'error_code' => $error['error'] ?? '',
-              'error_message' => (string)($error['error message'] ?? ''),
-              'file' => $template,
-              'content' => $query,
-            ]);
-        }
-    }
-
-    /**
-     * Registers that an error was fixed, does not touch last_seen so last_seen > fixed
-     * means the error came back after this fix
-     *
-     * @param string $errorHash
-     * @param string $comment developer notes, keeps the stored one when empty
-     * @return void
-     */
-    public static function fix(string $errorHash, string $comment = ''): void {
-        if(self::$sqlExecutor === null)
-            return;
-        $table = SqlUtils::fieldIt(self::$table);
-        $method = __METHOD__;
-        $set = "`status`='Fixed',`fixed`=NOW(),`fixed_times`=`fixed_times`+1";
-        $parameters = [];
-        if($comment !== '') {
-            $set .= ",`comment`=?";
-            $parameters[] = self::text($comment, self::$maxTextLength);
-        }
-        $parameters[] = $errorHash;
-        try {
-            self::$sqlExecutor->query("UPDATE /* $method */ $table SET $set WHERE `error_hash`=?", $parameters);
-        } catch (Throwable) { }
-    }
-
-    /**
-     * @return array<string, array<string, mixed>> the errors collected so far, hash => error
-     * @pure
-     */
-    public static function getErrors(): array {return self::$errors;}
 
     /**
      * Writes the collected errors and empties the log, called by the shutdown function
      *
      * @return void
      */
-    public static function flush(): void {
-        if(self::$isFlushing || self::$sqlExecutor === null || self::$queryBuilder === null || empty(self::$errors))
+    protected static function save(): void {
+        if(self::$isSaving || self::$sqlExecutor === null || self::$queryBuilder === null || empty(self::$errors))
             return;
-        self::$isFlushing = true;
+        self::$isSaving = true;
         $errors = self::$errors;
         self::$errors = [];
         self::$kept = [];
@@ -311,12 +334,13 @@ class ErrorLog {
               'request_uri' => self::text($error['request_uri'], 1000),
               'user_nick' => self::text($error['user_nick'], 16),
               'user_agent' => self::text($error['user_agent'], 1000),
+                'comment' => '',
             ];
             $insert = self::$queryBuilder->insert(self::$table, $values, true,
               array_values(array_diff(array_keys($values), $refresh)), $override, __METHOD__);
             self::write($insert);
         }
-        self::$isFlushing = false;
+        self::$isSaving = false;
     }
 
     /**
@@ -338,8 +362,13 @@ class ErrorLog {
     }
 
     protected static function rule(string $errorType, string $errorMessage, int|string $errorCode, string $content): void {
-        $caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1] ?? [];
-        $frames = self::callerFrames();
+        $frames = [];
+        foreach(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 9) as $frame) {
+            if(($frame['file'] ?? '') === __FILE__)
+                continue;
+            $frames[] = $frame;
+        }
+        $caller = $frames[0] ?? [];
         self::add($errorType, self::hashIt($caller['file'] ?? '', $caller['line'] ?? 0, $errorType, $errorCode), [
           'error_code' => $errorCode,
           'error_message' => $errorMessage,
@@ -375,16 +404,15 @@ class ErrorLog {
               'request_uri' => self::requestUri(),
               'user_nick' => self::$nick,
               'user_agent' => self::server('HTTP_USER_AGENT'),
-              'seen_count' => 0,
+              'seen_count' => 1,
             ], $error);
         }
-        ++self::$errors[$hash]['seen_count'];
     }
 
     /**
      * @pure
      */
-    protected static function hashIt(string $file, int $lineNumber, string $errorType, int|string $errorCode): string {
+    protected static function hashIt(string $file, int|string $lineNumber, string $errorType, int|string $errorCode): string {
         return hash('xxh3', "$file|$lineNumber|$errorType|$errorCode");
     }
 
@@ -393,7 +421,7 @@ class ErrorLog {
      */
     protected static function callerFrames(): array {
         $frames = [];
-        foreach(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame)
+        foreach(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 9) as $frame)
             if(($frame['class'] ?? '') !== self::class)
                 $frames[] = $frame;
         return $frames;
@@ -418,7 +446,7 @@ class ErrorLog {
 
     /**
      * Cuts the text to length and drops the invalid utf8 the cut or the error itself may leave,
-     * mysql rejects invalid utf8 and an error logger must not fail on the error it is logging
+     * mysql rejects invalid utf8, and an error logger must not fail on the error it is logging
      */
     protected static function text(string $text, int $length): string {
         $text = json_decode(json_encode(substr($text, 0, $length), SqlUtils::JSON_MYSQL_OPTIONS), true);
@@ -434,6 +462,7 @@ class ErrorLog {
         $host = self::server('HTTP_HOST');
         if($host === '')
             return self::server('REQUEST_URI');
+        /** @noinspection HttpUrlsUsage */
         return (self::server('HTTPS') === '' ? 'http://' : 'https://') . $host . self::server('REQUEST_URI');
     }
 
@@ -450,7 +479,7 @@ class ErrorLog {
 
             `first_seen` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'When this error template was first encountered',
             `last_seen` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'When this error template was last encountered',
-            `seen_count` MEDIUMINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Number of times this error template has occurred',
+            `seen_count` MEDIUMINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Number of times this error template has occurred. Adds 1 per run',
 
             `status` ENUM('Bug', 'Fixed', 'Won''t Fix') NOT NULL DEFAULT 'Bug' COMMENT 'Resolution status, every error_type starts as Bug and stays until closed as Fixed, or as Won''t Fix to keep it out of the pending list for good. A new occurrence returns Fixed to Bug, it does not touch Won''t Fix',
             `error_type` ENUM('SQL', 'PHP', 'JS', 'Domain', 'Info') NOT NULL COMMENT 'What raised it. SQL, PHP, JS: runtime errors. Domain: a business rule broken by the code, never by user input, a defect the code caught instead of crashing, invalid user input is validation and is not logged here. Info: a trace the developer placed to help debug, deleted from the code, or closed here, once it has served its purpose',

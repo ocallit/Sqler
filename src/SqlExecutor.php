@@ -912,7 +912,19 @@ class SqlExecutor {
             $template = "Error $errorNumber from mysqli_stmt";
         else
             $template = SqlUtils::createQueryTemplate($query);
-        $this->logError[$template] = ["error" => $errorNumber, "error message" => $errorMessage, "query" => $query, "parameters" => $parameters, "attempt" => $attempt, "template" => $template];
+        $hash = hash('xxh3', $template);
+        if(array_key_exists($hash, $this->logError))
+            return;
+
+        $this->logError[$hash] = [
+          "error" => $errorNumber,
+          "error_message" => $errorMessage,
+          "query" => $query,
+          "parameters" => $parameters,
+          "attempt" => $attempt,
+          "template" => $template,
+          "stack_trace" => array_slice(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 11), 2),
+        ];
     }
 
 }
