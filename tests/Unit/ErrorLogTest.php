@@ -203,7 +203,8 @@ class ErrorLogTest extends TestCase {
         $this->assertSame("Unknown column 'admin' in 'where clause'", $error['error_message']);
         $this->assertSame(__FILE__, $error['file']);
         $this->assertSame($expectedLine, $error['line_number']);
-        $this->assertSame($query . PHP_EOL . ' -- (42, admin)', $error['content']);
+        $this->assertSame($query . PHP_EOL . ' -- (42, admin)', $error['query']);
+        $this->assertSame(__FILE__ . ':' . $expectedLine . ' testSqlErrorLog()', $error['content']);
     }
 
 }

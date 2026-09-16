@@ -923,8 +923,20 @@ class SqlExecutor {
           "parameters" => $parameters,
           "attempt" => $attempt,
           "template" => $template,
-          "stack_trace" => array_slice(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 11), 2),
+          "stack_trace" => $this->callerFrames(),
         ];
+    }
+
+    /**
+     * @return array the stack frames from the caller of this class on, so file and line point
+     *   to the code that asked for the query, not to this file
+     */
+    protected function callerFrames(): array {
+        $frames = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 11);
+        foreach($frames as $index => $frame)
+            if(($frame['file'] ?? '') !== __FILE__)
+                return array_slice($frames, $index);
+        return $frames;
     }
 
 }
