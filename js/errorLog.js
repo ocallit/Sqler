@@ -5,6 +5,11 @@
  *   <script src="/js/errorLog.js"></script>
  *   <script src="/js/errorLog.js" data-url="/error_log/api/" data-max-errors="4" data-stack-lines="9"></script>
  *
+ * The same script logs the errors of a worker, as the first line of the worker:
+ *   importScripts('/js/errorLog.js');
+ * A worker has no script tag to read the options from, ErrorLog.start({url: '/error_log/api/'})
+ * sets them, and its own errors, hashes and count, the page's four are not spent by it.
+ *
  * Anything that throws before the script runs is not logged, the browser has no listener yet.
  * ErrorLog.start({url: '/error_log/api/'}) is only needed to set the options from javascript,
  * on a page that already started it a later start() call updates the options, the listeners
@@ -18,7 +23,7 @@
  * Listens to window error and unhandledrejection, posts action=log to the error_log api,
  * which stores the error with Ocallit\Sqler\ErrorLog::javascriptErrors().
  * An exception thrown inside a then(), an async function or an awaited call never fires the
- * window error event, the language turns it into a rejection of that promise, so
+ * error event, the language turns it into a rejection of that promise, so
  * unhandledrejection is what logs the errors of every asynchronous call. A rejection that
  * something catches is invisible to the browser and to this client, log those with
  * ErrorLog.log() from inside the catch.
@@ -32,6 +37,9 @@
  */
 var ErrorLog = (function() {
 'use strict';
+
+/** window in a page, self in a worker, the only global this script touches */
+var root = self;
 
 var url = '/error_log/api/';
 /** Distinct errors posted per page load */
@@ -47,7 +55,7 @@ var kept = 0;
 var previousOnError = null;
 
 /**
- * Registers the listeners, chaining any previously registered window.onerror
+ * Registers the listeners, chaining any previously registered onerror
  *
  * @param {Object} [options] url, maxErrors, stackLines
  */
@@ -58,15 +66,15 @@ function start(options) {
     stackLines = numberOption(options.stackLines, stackLines);
     if(isStarted) return;
     isStarted = true;
-    if(window.addEventListener) {
-        window.addEventListener('error', onError, false);
-        window.addEventListener('unhandledrejection', onRejection, false);
+    if(root.addEventListener) {
+        root.addEventListener('error', onError, false);
+        root.addEventListener('unhandledrejection', onRejection, false);
         return;
     }
-    previousOnError = window.onerror;
-    window.onerror = function(message, file, lineNumber, columnNumber, error) {
+    previousOnError = root.onerror;
+    root.onerror = function(message, file, lineNumber, columnNumber, error) {
         onError({message: message, filename: file, lineno: lineNumber, colno: columnNumber, error: error});
-        return previousOnError ? previousOnError.apply(window, arguments) : false;
+        return previousOnError ? previousOnError.apply(root, arguments) : false;
     };
 }
 
@@ -88,7 +96,7 @@ function log(error) {
           column_number: Number(error && error.columnNumber) || frame.column,
           function_name: functionIt(stack),
           content: stackIt(stack),
-          request_uri: location.href
+          request_uri: root.location.href
         });
     } catch(ignore) {}
 }
@@ -98,10 +106,11 @@ function getErrors() {return errors;}
 
 /**
  * Starts from the script tag, data-url, data-max-errors and data-stack-lines set the options,
- * an attribute that is missing or is not a value the option accepts keeps the default
+ * an attribute that is missing or is not a value the option accepts keeps the default.
+ * A worker has no document, it starts with the defaults until start() sets the options
  */
 function autoStart() {
-    var script = typeof document === 'undefined' ? null : document.currentScript;
+    var script = root.document ? root.document.currentScript : null;
     if(!script) {
         start();
         return;
@@ -126,7 +135,7 @@ function numberOption(value, byDefault) {
     return isFinite(value) && value > 0 ? value : byDefault;
 }
 
-/** window error listener, an ErrorEvent, or the object window.onerror builds */
+/** error listener, an ErrorEvent, or the object the onerror fallback builds */
 function onError(event) {
     try {
         var error = event.error || {};
@@ -141,12 +150,12 @@ function onError(event) {
           column_number: Number(event.colno) || frame.column,
           function_name: functionIt(error.stack),
           content: stackIt(error.stack),
-          request_uri: location.href
+          request_uri: root.location.href
         });
     } catch(ignore) {}
 }
 
-/** window unhandledrejection listener, the rejection carries no file, the stack does */
+/** unhandledrejection listener, the rejection carries no file, the stack does */
 function onRejection(event) {
     try {
         var reason = event.reason;
@@ -160,7 +169,7 @@ function onRejection(event) {
           column_number: frame.column,
           function_name: functionIt(stack),
           content: stackIt(stack),
-          request_uri: location.href
+          request_uri: root.location.href
         });
     } catch(ignore) {}
 }
@@ -180,10 +189,10 @@ function send(error) {
     for(name in error)
         if(Object.prototype.hasOwnProperty.call(error, name))
             body += '&' + encodeURIComponent(name) + '=' + encodeURIComponent(error[name]);
-    if(window.fetch) {
+    if(root.fetch) {
         // keepalive so an error on the last line of a page still gets posted,
         // catch so that a failed post does not become another error, or another rejection
-        window.fetch(url, {
+        root.fetch(url, {
           method: 'POST',
           headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
           body: body,
@@ -193,15 +202,15 @@ function send(error) {
         return;
     }
     try {
-        var request = new XMLHttpRequest();
+        var request = new root.XMLHttpRequest();
         request.open('POST', url, true);
         request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
         request.send(body);
         return;
     } catch(ignore) {}
     // neither fetch nor XMLHttpRequest, the console is the last place left to leave it
-    if(window.console && window.console.error)
-        window.console.error('ErrorLog could not post the error', error);
+    if(root.console && root.console.error)
+        root.console.error('ErrorLog could not post the error', error);
 }
 
 /** djb2 of file|line|JS|error_code, the browser's guard, the server hashes again */
