@@ -10,6 +10,7 @@ use function array_key_exists;
 use function array_keys;
 use function array_diff;
 use function array_merge;
+use function array_slice;
 use function array_values;
 use function call_user_func;
 use function hash;
@@ -161,6 +162,7 @@ class ErrorLog {
               'error_message' => (string)($error['error_message'] ?? ''),
               'file' => (string)($caller['file'] ?? ''),
               'line_number' => (int)($caller['line'] ?? 0),
+              'function_name' => self::functionIt(array_slice($stackTrace, 1)),
               'content' => self::traceIt($stackTrace),
               'query' => $query,
             ]);
