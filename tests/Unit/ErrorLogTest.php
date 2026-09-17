@@ -73,6 +73,7 @@ class ErrorLogTest extends TestCase {
         $this->assertSame('Business rule broken', $error['error_message']);
         $this->assertSame(__FILE__, $error['file']);
         $this->assertSame($line, $error['line_number']);
+        $this->assertSame(self::class . '->testLogWithStringDomainType', $error['function_name']);
     }
 
     public function testLogWithStringDomainConstantType(): void {
@@ -177,7 +178,7 @@ class ErrorLogTest extends TestCase {
         $parameters = [42, 'admin'];
         $hash = hash('xxh3', $template);
         $expectedLine = __LINE__ + 11;
-
+        $callerLine = $expectedLine + 20;
         $sqlErrorLog = [
             $hash => [
                 'error' => 1054,
@@ -187,7 +188,10 @@ class ErrorLogTest extends TestCase {
                 'attempt' => 1,
                 'template' => $template,
                 'stack_trace' => [
-                    ['file' => __FILE__, 'line' => $expectedLine, 'function' => 'testSqlErrorLog'],
+                  ['file' => __FILE__, 'line' => $expectedLine, 'class' => 'Ocallit\\Sqler\\SqlExecutor',
+                    'type' => '->', 'function' => 'firstValue'],
+                  ['file' => __FILE__, 'line' => $callerLine, 'class' => self::class,
+                    'type' => '->', 'function' => 'testSqlErrorLog'],
                 ],
             ],
         ];
@@ -204,7 +208,10 @@ class ErrorLogTest extends TestCase {
         $this->assertSame(__FILE__, $error['file']);
         $this->assertSame($expectedLine, $error['line_number']);
         $this->assertSame($query . PHP_EOL . ' -- (42, admin)', $error['query']);
-        $this->assertSame(__FILE__ . ':' . $expectedLine . ' testSqlErrorLog()', $error['content']);
+        $this->assertSame(self::class . '->testSqlErrorLog', $error['function_name']);
+        $this->assertSame(
+          __FILE__ . ':' . $expectedLine . ' Ocallit\\Sqler\\SqlExecutor->firstValue()' . "\n" .
+          __FILE__ . ':' . $callerLine . ' ' . self::class . '->testSqlErrorLog()', $error['content']);
     }
 
 }

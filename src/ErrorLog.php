@@ -10,6 +10,7 @@ use function array_key_exists;
 use function array_keys;
 use function array_diff;
 use function array_merge;
+use function array_slice;
 use function array_values;
 use function call_user_func;
 use function hash;
@@ -161,6 +162,7 @@ class ErrorLog {
               'error_message' => (string)($error['error_message'] ?? ''),
               'file' => (string)($caller['file'] ?? ''),
               'line_number' => (int)($caller['line'] ?? 0),
+              'function_name' => self::functionIt(array_slice($stackTrace, 1)),
               'content' => self::traceIt($stackTrace),
               'query' => $query,
             ]);
@@ -249,7 +251,8 @@ class ErrorLog {
               'error_message' => preg_last_error_msg(),
               'function_name' => 'preg_last_error',
             ]);
-        self::sqlErrorLog(self::$sqlExecutor->getErrorLog());
+        if(self::$sqlExecutor !== null)
+            self::sqlErrorLog(self::$sqlExecutor->getErrorLog());
         self::save();
     }
 
@@ -376,7 +379,7 @@ class ErrorLog {
           'error_message' => $errorMessage,
           'file' => $caller['file'] ?? '',
           'line_number' => $caller['line'] ?? 0,
-          'function_name' => self::functionIt($frames),
+          'function_name' => self::functionIt(array_slice($frames, 1)),
           'content' => $content === '' ? self::traceIt($frames) : $content,
         ]);
     }
@@ -488,6 +491,7 @@ class ErrorLog {
      * @return void
      */
     protected static function tableCreate(): void {
+
         $method = __METHOD__;
         self::$sqlExecutor->query("
         CREATE /* $method */ TABLE IF NOT EXISTS " . SqlUtils::fieldIt(self::$table) . " (
