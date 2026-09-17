@@ -197,7 +197,11 @@ function send(error) {
         request.open('POST', url, true);
         request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
         request.send(body);
+        return;
     } catch(ignore) {}
+    // neither fetch nor XMLHttpRequest, the console is the last place left to leave it
+    if(window.console && window.console.error)
+        window.console.error('ErrorLog could not post the error', error);
 }
 
 /** djb2 of file|line|JS|error_code, the browser's guard, the server hashes again */
