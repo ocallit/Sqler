@@ -161,7 +161,8 @@ class ErrorLog {
               'error_message' => (string)($error['error_message'] ?? ''),
               'file' => (string)($caller['file'] ?? ''),
               'line_number' => (int)($caller['line'] ?? 0),
-              'content' => $query,
+              'content' => self::traceIt($stackTrace),
+              'query' => $query,
             ]);
         }
     }
@@ -327,6 +328,7 @@ class ErrorLog {
               'error_code' => self::text((string)$error['error_code'], 32),
               'error_message' => self::text($error['error_message'], self::$maxTextLength),
               'content' => self::text($error['content'], self::$maxTextLength),
+              'query' => self::text($error['query'], self::$maxTextLength),
               'file' => self::text($error['file'], 500),
               'function_name' => self::text($error['function_name'], 255),
               'line_number' => $error['line_number'],
@@ -397,6 +399,7 @@ class ErrorLog {
               'error_code' => '',
               'error_message' => '',
               'content' => '',
+              'query' => '',
               'file' => '',
               'function_name' => '',
               'line_number' => 0,
@@ -406,6 +409,8 @@ class ErrorLog {
               'user_agent' => self::server('HTTP_USER_AGENT'),
               'seen_count' => 1,
             ], $error);
+            if(self::$errors[$hash]['file'] === '')
+                self::$errors[$hash]['file'] = self::scriptFile();
         }
     }
 
@@ -453,6 +458,17 @@ class ErrorLog {
         return is_string($text) ? $text : '';
     }
 
+    /**
+     * @return string the script that ran, the php binary when there is none, used when the
+     *   error carries no file
+     */
+    protected static function scriptFile(): string {
+        $file = self::server('SCRIPT_FILENAME');
+        if($file === '')
+            $file = self::server('PHP_SELF');
+        return $file === '' ? PHP_BINARY : $file;
+    }
+
     protected static function server(string $key): string {
         $value = $_SERVER[$key] ?? '';
         return is_string($value) ? $value : '';
@@ -485,7 +501,8 @@ class ErrorLog {
             `error_type` ENUM('SQL', 'PHP', 'JS', 'Domain', 'Info') NOT NULL COMMENT 'What raised it. SQL, PHP, JS: runtime errors. Domain: a business rule broken by the code, never by user input, a defect the code caught instead of crashing, invalid user input is validation and is not logged here. Info: a trace the developer placed to help debug, deleted from the code, or closed here, once it has served its purpose',
             `error_code` VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'Error code (errno, SQL error code, HTTP status, etc.)',
             `error_message` MEDIUMTEXT COMMENT 'Original error message',
-            `content` MEDIUMTEXT COMMENT 'Original error content, extra info (query, message, stack trace, etc.)',
+            `content` MEDIUMTEXT COMMENT 'Original error content, extra info (message, stack trace, etc.)',
+            `query` MEDIUMTEXT COMMENT 'Query and its parameters on SQL errors',
 
             `file` VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'File where error occurred, query template on SQL errors',
             `function_name` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Function/method name where error occurred',
