@@ -73,6 +73,7 @@ class ErrorLogTest extends TestCase {
         $this->assertSame('Business rule broken', $error['error_message']);
         $this->assertSame(__FILE__, $error['file']);
         $this->assertSame($line, $error['line_number']);
+        $this->assertSame(self::class . '->testLogWithStringDomainType', $error['function_name']);
     }
 
     public function testLogWithStringDomainConstantType(): void {

@@ -378,7 +378,7 @@ class ErrorLog {
           'error_message' => $errorMessage,
           'file' => $caller['file'] ?? '',
           'line_number' => $caller['line'] ?? 0,
-          'function_name' => self::functionIt($frames),
+          'function_name' => self::functionIt(array_slice($frames, 1)),
           'content' => $content === '' ? self::traceIt($frames) : $content,
         ]);
     }
