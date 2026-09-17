@@ -1,13 +1,22 @@
 /**
  * ErrorLog javascript client Quick Reference:
  *
- * Setup, once, as early as possible, before any other script:
- *   ErrorLog.start();                                  // errors and promise rejections
- *   ErrorLog.start({promises: false});                 // errors only
- *   ErrorLog.start({url: '/error_log/api/'});          // when the page is not at the site root
+ * Setup, include it as the first script of the page, it starts itself:
+ *   <script src="/js/errorLog.js"></script>
+ *   <script src="/js/errorLog.js" data-url="/error_log/api/" data-max-errors="4" data-stack-lines="9"></script>
+ *
+ * Anything that throws before the script runs is not logged, the browser has no listener yet.
+ * ErrorLog.start({url: '/error_log/api/'}) is only needed to set the options from javascript,
+ * on a page that already started it a later start() call updates the options, the listeners
+ * are registered once.
  *
  * Listens to window error and unhandledrejection, posts action=log to the error_log api,
  * which stores the error with Ocallit\Sqler\ErrorLog::javascriptErrors().
+ * An exception thrown inside a then(), an async function or an awaited call never fires the
+ * window error event, the language turns it into a rejection of that promise, so
+ * unhandledrejection is what logs the errors of every asynchronous call. A rejection that
+ * something catches is invisible to the browser and to this client, report those from inside
+ * the catch.
  *
  * Only the first ErrorLog.maxErrors distinct hashes of a page load are posted, a repeat of a
  * kept hash and anything past the last one return without a request. The hash is djb2 of
@@ -19,13 +28,11 @@
 var ErrorLog = (function() {
 'use strict';
 
-var url = 'error_log/api/';
+var url = '/error_log/api/';
 /** Distinct errors posted per page load */
 var maxErrors = 4;
 /** Longest stack trace posted, in lines */
 var stackLines = 9;
-/** Whether unhandled promise rejections are logged */
-var promises = true;
 
 var isStarted = false;
 /** {hash: {file: , line_number: , ...}} the errors posted so far, hash => error */
@@ -37,19 +44,18 @@ var previousOnError = null;
 /**
  * Registers the listeners, chaining any previously registered window.onerror
  *
- * @param {Object} [options] url, maxErrors, stackLines, promises
+ * @param {Object} [options] url, maxErrors, stackLines
  */
 function start(options) {
     options = options || {};
-    if(typeof options.url === 'string') url = options.url;
-    if(typeof options.maxErrors === 'number') maxErrors = options.maxErrors;
-    if(typeof options.stackLines === 'number') stackLines = options.stackLines;
-    if(typeof options.promises === 'boolean') promises = options.promises;
+    if(typeof options.url === 'string' && options.url !== '') url = options.url;
+    if(typeof options.maxErrors === 'number' && options.maxErrors > 0) maxErrors = options.maxErrors;
+    if(typeof options.stackLines === 'number' && options.stackLines > 0) stackLines = options.stackLines;
     if(isStarted) return;
     isStarted = true;
     if(window.addEventListener) {
         window.addEventListener('error', onError, false);
-        if(promises) window.addEventListener('unhandledrejection', onRejection, false);
+        window.addEventListener('unhandledrejection', onRejection, false);
         return;
     }
     previousOnError = window.onerror;
@@ -62,11 +68,24 @@ function start(options) {
 /** @return {Object} the errors posted so far, hash => error */
 function getErrors() {return errors;}
 
+/** Starts from the script tag, data-url, data-max-errors and data-stack-lines set the options */
+function autoStart() {
+    var script = typeof document === 'undefined' ? null : document.currentScript, options = {};
+    if(script) {
+        options.url = script.getAttribute('data-url') || '';
+        options.maxErrors = Number(script.getAttribute('data-max-errors'));
+        options.stackLines = Number(script.getAttribute('data-stack-lines'));
+    }
+    start(options);
+}
+
 /** window error listener, an ErrorEvent, or the object window.onerror builds */
 function onError(event) {
     try {
         var error = event.error || {};
         var frame = frameIt(error.stack);
+        // Cross-origin scripts report "Script error." with no file, line or stack unless the
+        // tag has crossorigin="anonymous" and the CDN sends Access-Control-Allow-Origin
         add({
           error_code: codeIt(error, 'Error'),
           error_message: String(event.message || error.message || 'Unknown error'),
@@ -174,6 +193,8 @@ function frameIt(stack) {
     if(!match) return {file: '', line: 0, column: 0};
     return {file: match[1], line: Number(match[2]) || 0, column: Number(match[3]) || 0};
 }
+
+autoStart();
 
 return {start: start, getErrors: getErrors};
 
