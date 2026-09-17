@@ -10,13 +10,18 @@
  * on a page that already started it a later start() call updates the options, the listeners
  * are registered once.
  *
+ * Logging what the code catches, the window listeners never see it:
+ *   try { risky(); } catch(err) { ErrorLog.log(err); }
+ *   fetch(url)['catch'](function(err) { ErrorLog.log(err); });
+ *   ErrorLog.log(new Error('total does not match the cart'));   // new Error carries the stack
+ *
  * Listens to window error and unhandledrejection, posts action=log to the error_log api,
  * which stores the error with Ocallit\Sqler\ErrorLog::javascriptErrors().
  * An exception thrown inside a then(), an async function or an awaited call never fires the
  * window error event, the language turns it into a rejection of that promise, so
  * unhandledrejection is what logs the errors of every asynchronous call. A rejection that
- * something catches is invisible to the browser and to this client, report those from inside
- * the catch.
+ * something catches is invisible to the browser and to this client, log those with
+ * ErrorLog.log() from inside the catch.
  *
  * Only the first ErrorLog.maxErrors distinct hashes of a page load are posted, a repeat of a
  * kept hash and anything past the last one return without a request. The hash is djb2 of
@@ -63,6 +68,29 @@ function start(options) {
         onError({message: message, filename: file, lineno: lineNumber, colno: columnNumber, error: error});
         return previousOnError ? previousOnError.apply(window, arguments) : false;
     };
+}
+
+/**
+ * Logs an error the code caught, it counts against the same maxErrors of the page load
+ *
+ * @param {*} error the caught Error, or anything a throw or a rejection carried
+ * @return {void}
+ */
+function log(error) {
+    try {
+        var stack = error && error.stack ? error.stack : '';
+        var frame = frameIt(stack);
+        add({
+          error_code: codeIt(error, 'Caught'),
+          error_message: messageIt(error),
+          file: String((error && error.fileName) || frame.file),
+          line_number: Number(error && error.lineNumber) || frame.line,
+          column_number: Number(error && error.columnNumber) || frame.column,
+          function_name: functionIt(stack),
+          content: stackIt(stack),
+          request_uri: location.href
+        });
+    } catch(ignore) {}
 }
 
 /** @return {Object} the errors posted so far, hash => error */
@@ -215,6 +243,6 @@ function frameIt(stack) {
 
 autoStart();
 
-return {start: start, getErrors: getErrors};
+return {start: start, log: log, getErrors: getErrors};
 
 })();
