@@ -48,9 +48,9 @@ var previousOnError = null;
  */
 function start(options) {
     options = options || {};
-    if(typeof options.url === 'string' && options.url !== '') url = options.url;
-    if(typeof options.maxErrors === 'number' && options.maxErrors > 0) maxErrors = options.maxErrors;
-    if(typeof options.stackLines === 'number' && options.stackLines > 0) stackLines = options.stackLines;
+    url = textOption(options.url, url);
+    maxErrors = numberOption(options.maxErrors, maxErrors);
+    stackLines = numberOption(options.stackLines, stackLines);
     if(isStarted) return;
     isStarted = true;
     if(window.addEventListener) {
@@ -68,15 +68,34 @@ function start(options) {
 /** @return {Object} the errors posted so far, hash => error */
 function getErrors() {return errors;}
 
-/** Starts from the script tag, data-url, data-max-errors and data-stack-lines set the options */
+/**
+ * Starts from the script tag, data-url, data-max-errors and data-stack-lines set the options,
+ * an attribute that is missing or is not a value the option accepts keeps the default
+ */
 function autoStart() {
-    var script = typeof document === 'undefined' ? null : document.currentScript, options = {};
-    if(script) {
-        options.url = script.getAttribute('data-url') || '';
-        options.maxErrors = Number(script.getAttribute('data-max-errors'));
-        options.stackLines = Number(script.getAttribute('data-stack-lines'));
+    var script = typeof document === 'undefined' ? null : document.currentScript;
+    if(!script) {
+        start();
+        return;
     }
-    start(options);
+    start({
+      url: script.getAttribute('data-url'),
+      maxErrors: script.getAttribute('data-max-errors'),
+      stackLines: script.getAttribute('data-stack-lines')
+    });
+}
+
+/** @return {string} the option when it is text, the default when it is anything else */
+function textOption(value, byDefault) {
+    if(typeof value !== 'string') return byDefault;
+    value = value.replace(/^\s+|\s+$/g, '');
+    return value === '' ? byDefault : value;
+}
+
+/** @return {number} the option when it is a whole number over zero, the default otherwise */
+function numberOption(value, byDefault) {
+    value = Math.floor(Number(value));
+    return isFinite(value) && value > 0 ? value : byDefault;
 }
 
 /** window error listener, an ErrorEvent, or the object window.onerror builds */
