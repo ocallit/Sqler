@@ -251,7 +251,8 @@ class ErrorLog {
               'error_message' => preg_last_error_msg(),
               'function_name' => 'preg_last_error',
             ]);
-        self::sqlErrorLog(self::$sqlExecutor->getErrorLog());
+        if(self::$sqlExecutor !== null)
+            self::sqlErrorLog(self::$sqlExecutor->getErrorLog());
         self::save();
     }
 
