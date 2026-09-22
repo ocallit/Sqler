@@ -5,104 +5,288 @@
 namespace Ocallit\Sqler;
 
 use Exception;
+use RuntimeException;
 
 /**
- * Validates an associative array of column values against the MySQL schema of a given table.
+ * Validates and fixes an associative array of values, usually from an HTML form, against the MySQL schema.
  *
  * Usage:
- *   $result = ValidatorSql::validate('orders', $data, $sqlExecutor);
- *   // $result['valid']    bool
- *   // $result['errors']   array<columnName, string[]>  — per-column error messages
- *   // $result['warnings'] array<string, string[]>       — column names absent from $data with no default
+ *   $validator = new ValidatorSql($sqlExecutor);
+ *   $data   = $validator->fix('orders', $_POST);
+ *   $errors = $validator->validateVsTable('orders', $data);          // [colName => userFriendlyError]
+ *   $errors = $validator->validateVsQuery('SELECT ...', $data);      // [selectClauseName => userFriendlyError]
+ *   $errors = $validator->validateUnique('orders', $data);           // [indexName => userFriendlyError]
+ *   $errors = $validator->validateForeignKeys('orders', $data);      // [constraintName => userFriendlyError]
  *
- * Requirements:
- *   - DatabaseMetadata::initialize($sql) must have been called before first use.
- *   - Primary key column(s) must always be present in $data.
- *   - Missing non-PK columns without a default value produce warnings, not errors.
- *   - Source is HTML, so "33" or "3.14" (with .00 fractional) are valid integers.
- *   - Decimal/float values are never cast to float; bcmath is used for precision.
+ * Rules:
+ *   - DatabaseMetadata is initialized with $sqlExecutor if it was not initialized already.
+ *   - Keys in $data that are not columns of the table/query are ignored.
+ *   - Values are checked as fix() would leave them: " 1,234.00 " is a valid integer.
+ *   - Source is HTML, so "33" or "3.14" are valid numbers and "3.00" is a valid integer.
+ *   - Decimal/integer values are never cast to float; bcmath is used for precision.
  *   - Date strings must be Y-m-d; datetime/timestamp Y-m-d H:i:s (time part completed if missing).
  *   - Time strings must be H:i:s (seconds completed if missing).
+ *   - A unique index comment, when set, is used as its error message.
  */
 class ValidatorSql {
+    protected SqlExecutor $sqlExecutor;
+    protected DatabaseMetadata $databaseMetadata;
+
+    public function __construct(SqlExecutor $sqlExecutor) {
+        $this->sqlExecutor = $sqlExecutor;
+        try {
+            $this->databaseMetadata = DatabaseMetadata::getInstance();
+        } catch(RuntimeException) {
+            DatabaseMetadata::initialize($sqlExecutor);
+            $this->databaseMetadata = DatabaseMetadata::getInstance();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Input validator vs db-schema
+    // -------------------------------------------------------------------------
 
     /**
-     * @param string      $tableName
-     * @param array<string, mixed> $data       Keys are column names, values are submitted values.
-     * @param string      $database   Optional database name; defaults to the connection's current DB.
-     *
-     * @return array{
-     *   valid: bool,
-     *   errors: array<string, string[]>,
-     *   warnings: array<string, string[]>
-     * }
+     * @param string $tableName
+     * @param array<string, mixed> $data Keys are column names, values are submitted values.
+     * @return array<string, string> [colNameWithError => userFriendlyError]
      * @throws Exception
      */
-    public static function validate(
-        string $tableName,
-        array $data,
-        string $database = ""
-    ): array {
-        $meta = DatabaseMetadata::getInstance();
-        $columns = $meta->table($tableName, $database);
+    public function validateVsTable(string $tableName, array $data): array {
+        return $this->validateVsColumns($this->tableColumns($tableName), $data);
+    }
 
-        /** @var array<string, string[]> $errors */
-        $errors   = [];
-        /** @var array<string, string[]> $warnings */
-        $warnings = [];
+    /**
+     * Note: the query is executed to read its metadata, add a LIMIT 0 or WHERE 0 to make it cheap.
+     *
+     * @param string $selectQuery
+     * @param array<string, mixed> $data Keys are select clause names (aliases), values are submitted values.
+     * @return array<string, string> [selectClauseNameWithError => userFriendlyError]
+     * @throws Exception
+     */
+    public function validateVsQuery(string $selectQuery, array $data): array {
+        return $this->validateVsColumns($this->databaseMetadata->query($selectQuery), $data);
+    }
 
-        // 2. Warn about non-PK columns absent from $data that have no default
-        foreach ($columns as $colName => $col) {
-            if (array_key_exists($colName, $data)) {
+    // -------------------------------------------------------------------------
+    // Unique check
+    // -------------------------------------------------------------------------
+
+    /**
+     * For each unique index (not the primary key) whose columns are all in $data, check no other record,
+     * one with a different primary key, has the same values.
+     * An index with a NULL value, or with a column missing from $data, is not checked.
+     *
+     * @param string $tableName
+     * @param array<string, mixed> $data [colName => value], include the primary key when updating
+     * @return array<string, string> [indexName => userFriendlyError]
+     * @throws Exception
+     */
+    public function validateUnique(string $tableName, array $data): array {
+        $columns = $this->tableColumns($tableName);
+        $data = $this->fixValues($columns, $data);
+        $primaryKey = $this->databaseMetadata->primaryKeys()[$tableName] ?? [];
+        $table = SqlUtils::fieldIt($tableName);
+
+        $notSameRecord = "";
+        $notSameRecordParameters = $this->keyValues($primaryKey, $columns, $data) ?? [];
+        if(!empty($notSameRecordParameters))
+            $notSameRecord = " AND NOT (" . self::whereEquals($primaryKey) . ")";
+
+        $errors = [];
+        foreach($this->databaseMetadata->uniqueIndexes($tableName) as $indexName => $index) {
+            $parameters = $this->keyValues($index['cols'], $columns, $data);
+            if($parameters === NULL)
                 continue;
-            }
-            if (isset($primaryKeys[$colName])) {
+            $method = __METHOD__;
+            $found = $this->sqlExecutor->row(
+              "SELECT /*$method*/ 1 FROM $table WHERE " . self::whereEquals($index['cols']) . "$notSameRecord LIMIT 1",
+              array_merge($parameters, $notSameRecordParameters)
+            );
+            if(empty($found))
                 continue;
-            }
-            $hasDefault      = $col['default_value'] !== null;
-            $isNullable      = strcasecmp($col['is_nullable'] ?? 'NO', 'YES') === 0;
-            $isAutoIncrement = str_contains(strtolower($col['extra'] ?? ''), 'auto_increment');
-            $isGenerated     = !empty($col['generation_expression']);
+            $errors[$indexName] = !empty($index['comment']) ? $index['comment'] :
+              "A record with the same " . $this->labels($index['cols']) . " already exists.";
+        }
+        return $errors;
+    }
 
-            if (!$hasDefault && !$isNullable && !$isAutoIncrement && !$isGenerated) {
-                $warnings[$colName][] = "Column '$colName' has no default value and is not present in data.";
+    // -------------------------------------------------------------------------
+    // Valid foreign keys
+    // -------------------------------------------------------------------------
+
+    /**
+     * For each foreign key whose columns are all in $data, check the referenced record exists.
+     * A foreign key with a NULL value, or with a column missing from $data, is not checked.
+     *
+     * @param string $tableName
+     * @param array<string, mixed> $data [colName => value]
+     * @return array<string, string> [constraintName => userFriendlyError]
+     * @throws Exception
+     */
+    public function validateForeignKeys(string $tableName, array $data): array {
+        $columns = $this->tableColumns($tableName);
+        $data = $this->fixValues($columns, $data);
+        $errors = [];
+        foreach($this->databaseMetadata->foreignKeysAll()['references'][$tableName] ?? [] as $referencedTable => $constraints) {
+            foreach($constraints as $constraintName => $fk) {
+                $parameters = $this->keyValues($fk['referencing_column'], $columns, $data);
+                if($parameters === NULL)
+                    continue;
+                $method = __METHOD__;
+                $found = $this->sqlExecutor->row(
+                  "SELECT /*$method*/ 1 FROM " . SqlUtils::fieldIt($referencedTable) . " WHERE " . self::whereEquals($fk['referenced_column']) . " LIMIT 1",
+                  $parameters
+                );
+                if(!empty($found))
+                    continue;
+                $errors[$constraintName] = "The selected " . $this->labels($fk['referencing_column']) . " does not exist.";
             }
         }
+        return $errors;
+    }
 
-        // 3. Per-column type validation
-        foreach ($data as $colName => $value) {
-            if (!isset($columns[$colName])) {
-                $errors[$colName][] = "Column '$colName' does not exist in table '$tableName'.";
+    // -------------------------------------------------------------------------
+    // Input fix
+    // -------------------------------------------------------------------------
+
+    /**
+     * - Numbers that come as strings stay as strings: trimmed and commas removed.
+     * - Integer columns: a zero fractional part is removed, "3.00" becomes "3".
+     * - char/varchar are trimmed with SqlUtils::sTrim().
+     * - Fields not in the table or query stay as they are.
+     *
+     * @param string $tableNameOrSelectQuery A table name, or a query starting with SELECT, WITH or (
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     * @throws Exception
+     */
+    public function fix(string $tableNameOrSelectQuery, array $data): array {
+        $columns = preg_match('/^\s*(\(|SELECT\b|WITH\b)/i', $tableNameOrSelectQuery) ?
+          $this->databaseMetadata->query($tableNameOrSelectQuery) :
+          $this->tableColumns($tableNameOrSelectQuery);
+        return $this->fixValues($columns, $data);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array<string, array> [colName => column metadata]
+     * @throws Exception
+     */
+    protected function tableColumns(string $tableName): array {
+        $columns = $this->databaseMetadata->table($tableName);
+        if(empty($columns))
+            throw new Exception("Table '$tableName' not found.");
+        return $columns;
+    }
+
+    /**
+     * @param array<string, array> $columns table() or query() metadata
+     * @param array<string, mixed> $data
+     * @return array<string, string>
+     */
+    protected function validateVsColumns(array $columns, array $data): array {
+        $errors = [];
+        foreach($this->fixValues($columns, $data) as $colName => $value) {
+            if(!isset($columns[$colName]))
                 continue;
-            }
-            $colErrors = self::validateValue($value, $columns[$colName]);
-            if (!empty($colErrors)) {
-                $errors[$colName] = array_merge($errors[$colName] ?? [], $colErrors);
-            }
+            $error = self::validateValue($value, $columns[$colName]);
+            if($error !== '')
+                $errors[$colName] = $error;
         }
+        return $errors;
+    }
 
-        return [
-            'valid'    => empty($errors),
-            'errors'   => $errors,
-            'warnings' => $warnings,
-        ];
+    /**
+     * @param array<string, array> $columns table() or query() metadata
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    protected function fixValues(array $columns, array $data): array {
+        foreach($data as $colName => $value)
+            if(isset($columns[$colName]))
+                $data[$colName] = self::fixValue($value, $columns[$colName]);
+        return $data;
+    }
+
+    protected static function fixValue(mixed $value, array $col): mixed {
+        if(!is_string($value))
+            return $value;
+        $dataType = strtolower($col['data_type'] ?? '');
+        switch($dataType) {
+            case 'tinyint': case 'smallint': case 'int': case 'mediumint': case 'bigint': case 'year':
+                $value = str_replace(',', '', trim($value));
+                return preg_match('/^([+-]?\d+)\.0*$/', $value, $matches) ? $matches[1] : $value;
+            case 'decimal': case 'numeric': case 'float': case 'double': case 'real':
+                return str_replace(',', '', trim($value));
+            case 'char': case 'varchar':
+                return SqlUtils::sTrim($value);
+        }
+        return $value;
+    }
+
+    /**
+     * The values of $colNames in $data, NULL when a column is missing from $data or its value is NULL.
+     * An empty string counts as NULL for nullable non char/varchar columns, as sent by an empty HTML input.
+     *
+     * @param array<array-key, string> $colNames
+     * @param array<string, array> $columns table() metadata
+     * @param array<string, mixed> $data
+     * @return list<mixed>|null
+     */
+    protected function keyValues(array $colNames, array $columns, array $data): ?array {
+        if(empty($colNames))
+            return NULL;
+        $values = [];
+        foreach($colNames as $colName) {
+            $value = $data[$colName] ?? NULL;
+            if($value === NULL || ($value === '' && self::isEmptyNull($columns[$colName] ?? [])))
+                return NULL;
+            $values[] = $value;
+        }
+        return $values;
+    }
+
+    /** @param array<array-key, string> $colNames  @return string "`col1` = ? AND `col2` = ?" */
+    protected static function whereEquals(array $colNames): string {
+        return implode(' AND ', array_map(static fn(string $colName): string => SqlUtils::fieldIt($colName) . " = ?", $colNames));
+    }
+
+    protected static function isEmptyNull(array $col): bool {
+        return strcasecmp($col['is_nullable'] ?? 'NO', 'YES') === 0 &&
+          !in_array(strtolower($col['data_type'] ?? ''), ['char', 'varchar'], TRUE);
+    }
+
+    /** @param array<array-key, string> $colNames */
+    protected function labels(array $colNames): string {
+        return implode(', ', array_map([SqlUtils::class, 'toLabel'], $colNames));
+    }
+
+    protected static function label(array $col): string {
+        return SqlUtils::toLabel($col['name'] ?? '');
+    }
+
+    protected static function isNullable(array $col): bool {
+        if(isset($col['is_nullable']))
+            return strcasecmp($col['is_nullable'], 'YES') === 0;
+        return !(($col['flags'] ?? 0) & MYSQLI_NOT_NULL_FLAG);
     }
 
     // -------------------------------------------------------------------------
     // Per-value type dispatch
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateValue(mixed $value, array $col): array {
-        $dataType   = strtolower($col['data_type'] ?? '');
-        $isNullable = strcasecmp($col['is_nullable'] ?? 'NO', 'YES') === 0;
-        $colName    = $col['name'];
+    /** @return string '' when valid, else a user-friendly error */
+    protected static function validateValue(mixed $value, array $col): string {
+        $dataType = strtolower($col['data_type'] ?? '');
 
-        if ($value === null || $value === '') {
-            if (!$isNullable) {
-                return ["Column '$colName' cannot be null/empty."];
-            }
-            return [];
+        if($value === NULL || $value === '') {
+            if(!self::isNullable($col) && !str_contains(strtolower($col['extra'] ?? ''), 'auto_increment'))
+                return self::label($col) . " is required.";
+            return '';
         }
 
         return match ($dataType) {
@@ -126,34 +310,38 @@ class ValidatorSql {
                 => self::validateTime($value, $col),
             'bit'
                 => self::validateBit($value, $col),
-            default => [],
+            default => '',
         };
+    }
+
+    /**
+     * Split a decimal number string into [sign, integerDigits, fractionDigits], NULL if not a decimal number.
+     * Accepts "3", "-3.14", "+3.", ".5"; no exponent.
+     *
+     * @return array{0: string, 1: string, 2: string}|null
+     */
+    protected static function decimalParts(mixed $value): ?array {
+        if(!preg_match('/^([+-]?)(\d*)(?:\.(\d*))?$/', (string)$value, $matches) || ($matches[2] === '' && ($matches[3] ?? '') === ''))
+            return NULL;
+        return [$matches[1] === '-' ? '-' : '', $matches[2] === '' ? '0' : $matches[2], $matches[3] ?? ''];
     }
 
     // -------------------------------------------------------------------------
     // Integer types
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateInteger(mixed $value, array $col): array {
-        $colName = $col['name'];
-
-        if (!is_numeric($value)) {
-            return ["Column '$colName' must be a numeric integer value."];
-        }
-
-        $strVal = (string)$value;
+    protected static function validateInteger(mixed $value, array $col): string {
+        $label = self::label($col);
+        $parts = self::decimalParts($value);
+        if($parts === NULL)
+            return "$label must be a whole number.";
 
         // Reject non-zero fractional part (e.g. "3.14") but accept "3.00"
-        if (str_contains($strVal, '.')) {
-            $frac = rtrim(explode('.', $strVal, 2)[1] ?? '0', '0');
-            if ($frac !== '') {
-                return ["Column '$colName' must be an integer; fractional value '$value' is not allowed."];
-            }
-        }
+        [$sign, $intPart, $fraction] = $parts;
+        if(rtrim($fraction, '0') !== '')
+            return "$label must be a whole number, $value has decimals.";
 
-        // Integer part only (strip any trailing .00)
-        $intStr  = str_contains($strVal, '.') ? explode('.', $strVal, 2)[0] : $strVal;
+        $intStr = $sign . $intPart;
         $dataType = strtolower($col['data_type']);
         $unsigned = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
 
@@ -167,210 +355,180 @@ class ValidatorSql {
             'year'      => ['1901', '2155'],
         ];
 
-        if (isset($ranges[$dataType])) {
+        if(isset($ranges[$dataType])) {
             [$min, $max] = $ranges[$dataType];
-            if (bccomp($intStr, $min) < 0 || bccomp($intStr, $max) > 0) {
-                return ["Column '$colName' value $value is out of range [$min, $max]."];
-            }
+            if(bccomp($intStr, $min) < 0 || bccomp($intStr, $max) > 0)
+                return "$label must be between $min and $max.";
         }
 
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // Decimal / numeric
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateDecimal(mixed $value, array $col): array {
-        $colName = $col['name'];
+    protected static function validateDecimal(mixed $value, array $col): string {
+        $label = self::label($col);
+        $parts = self::decimalParts($value);
+        if($parts === NULL)
+            return "$label must be a number.";
 
-        if (!is_numeric($value)) {
-            return ["Column '$colName' must be a numeric value."];
-        }
+        [$sign, $intPart, $fraction] = $parts;
+        $unsigned = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
+        if($unsigned && $sign === '-' && trim($intPart . $fraction, '0') !== '')
+            return "$label can not be negative.";
 
-        $precision = (int)($col['numeric_precision'] ?? 10);
-        $scale     = (int)($col['numeric_scale'] ?? 0);
-        $unsigned  = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
-        $strVal    = (string)$value;
+        // Unknown precision, ie a derived query column
+        if(!isset($col['numeric_precision']))
+            return '';
+        $precision = (int)$col['numeric_precision'];
+        $scale = (int)($col['numeric_scale'] ?? 0);
 
         // Round to defined scale without converting to float
-        $rounded = bcadd($strVal, '0', $scale);
-
-        if ($unsigned && bccomp($rounded, '0') < 0) {
-            return ["Column '$colName' must be non-negative (unsigned decimal)."];
-        }
+        $rounded = bcadd($fraction === '' ? $intPart : "$intPart.$fraction", '0', $scale);
 
         // Max integer digits = precision - scale
         $maxIntDigits = $precision - $scale;
-        $intPart      = explode('.', $rounded, 2)[0];
-        $intPart      = ltrim($intPart, '-');           // absolute integer part
-        $actualDigits = strlen(ltrim($intPart, '0')) ?: 0;
+        $actualDigits = strlen(ltrim(explode('.', $rounded, 2)[0], '0'));
+        if($actualDigits > $maxIntDigits)
+            return "$label is too large, at most $maxIntDigits digits before the decimal point.";
 
-        if ($actualDigits > $maxIntDigits) {
-            return ["Column '$colName' value $value exceeds allowed precision ($precision,$scale): too many integer digits."];
-        }
-
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // Float / double
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateFloat(mixed $value, array $col): array {
-        if (!is_numeric($value)) {
-            return ["Column '{$col['name']}' must be a numeric value."];
-        }
-        return [];
+    protected static function validateFloat(mixed $value, array $col): string {
+        if(!is_numeric($value))
+            return self::label($col) . " must be a number.";
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // String types
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateString(mixed $value, array $col): array {
-        $maxLen = $col['character_maximum_length'] ?? null;
-        if ($maxLen === null) {
-            return [];
-        }
+    protected static function validateString(mixed $value, array $col): string {
+        $maxLen = $col['character_maximum_length'] ?? NULL;
+        if($maxLen === NULL)
+            return '';
         $len = mb_strlen((string)$value, 'UTF-8');
-        if ($len > (int)$maxLen) {
-            return ["Column '{$col['name']}' exceeds maximum length of $maxLen characters (got $len)."];
-        }
-        return [];
+        if($len > (int)$maxLen)
+            return self::label($col) . " can have at most $maxLen characters, it has $len.";
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // ENUM
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateEnum(mixed $value, array $col): array {
+    protected static function validateEnum(mixed $value, array $col): string {
         $options = DatabaseMetadata::getInstance()->parseEnumSetOptions($col['Type'] ?? '');
-        if (!isset($options[(string)$value])) {
+        if(!isset($options[(string)$value])) {
             $allowed = implode(', ', array_keys($options));
-            return ["Column '{$col['name']}' value '$value' is not a valid ENUM. Allowed: $allowed"];
+            return self::label($col) . " must be one of: $allowed.";
         }
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // SET
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateSet(mixed $value, array $col): array {
+    protected static function validateSet(mixed $value, array $col): string {
         $options = DatabaseMetadata::getInstance()->parseEnumSetOptions($col['Type'] ?? '');
-        $items   = array_map('trim', explode(',', (string)$value));
+        $items = array_map('trim', explode(',', (string)$value));
         $invalid = [];
-        foreach ($items as $item) {
-            if (!isset($options[$item])) {
+        foreach($items as $item)
+            if(!isset($options[$item]))
                 $invalid[] = $item;
-            }
-        }
-        if (!empty($invalid)) {
+        if(!empty($invalid)) {
             $allowed = implode(', ', array_keys($options));
-            return ["Column '{$col['name']}' contains invalid SET values: " . implode(', ', $invalid) . ". Allowed: $allowed"];
+            return self::label($col) . " has invalid options: " . implode(', ', $invalid) . ". Allowed: $allowed.";
         }
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // Date
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateDate(mixed $value, array $col): array {
+    protected static function validateDate(mixed $value, array $col): string {
         $str = (string)$value;
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
-            return ["Column '{$col['name']}' must be a date in Y-m-d format. Got: $str"];
-        }
+        if(!preg_match('/^\d{4}-\d{2}-\d{2}$/', $str))
+            return self::label($col) . " must be a date as yyyy-mm-dd.";
         [$y, $m, $d] = explode('-', $str);
-        if (!checkdate((int)$m, (int)$d, (int)$y)) {
-            return ["Column '{$col['name']}' has an invalid date: $str"];
-        }
-        return [];
+        if(!checkdate((int)$m, (int)$d, (int)$y))
+            return self::label($col) . " is not a valid date: $str.";
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // DateTime / Timestamp
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateDateTime(mixed $value, array $col): array {
+    protected static function validateDateTime(mixed $value, array $col): string {
         $str = (string)$value;
 
         // Complete missing time parts
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
+        if(preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
             $str .= ' 00:00:00';
-        } elseif (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $str)) {
+        } elseif(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $str)) {
             $str .= ':00';
-        } elseif (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/', $str)) {
+        } elseif(preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/', $str)) {
             $str = str_replace('T', ' ', $str);
-        } elseif (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $str)) {
+        } elseif(preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $str)) {
             $str = str_replace('T', ' ', $str) . ':00';
         }
 
-        if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $str)) {
-            return ["Column '{$col['name']}' must be a datetime in Y-m-d H:i:s format. Got: $value"];
-        }
+        if(!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $str))
+            return self::label($col) . " must be a date and time as yyyy-mm-dd hh:mm:ss.";
 
         [$datePart, $timePart] = explode(' ', $str, 2);
-        [$y, $m, $d]           = explode('-', $datePart);
-        [$h, $i, $s]           = explode(':', $timePart);
+        [$y, $m, $d] = explode('-', $datePart);
+        [$h, $i, $s] = explode(':', $timePart);
 
-        if (!checkdate((int)$m, (int)$d, (int)$y)) {
-            return ["Column '{$col['name']}' has an invalid date part: $datePart"];
-        }
-        if ((int)$h > 23 || (int)$i > 59 || (int)$s > 59) {
-            return ["Column '{$col['name']}' has an invalid time part: $timePart"];
-        }
+        if(!checkdate((int)$m, (int)$d, (int)$y))
+            return self::label($col) . " is not a valid date: $datePart.";
+        if((int)$h > 23 || (int)$i > 59 || (int)$s > 59)
+            return self::label($col) . " is not a valid time: $timePart.";
 
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // Time
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateTime(mixed $value, array $col): array {
+    protected static function validateTime(mixed $value, array $col): string {
         $str = (string)$value;
 
         // Complete missing seconds
-        if (preg_match('/^-?\d{1,3}:\d{2}$/', $str)) {
+        if(preg_match('/^-?\d{1,3}:\d{2}$/', $str))
             $str .= ':00';
-        }
 
         // MySQL TIME: -838:59:59 to 838:59:59
-        if (!preg_match('/^-?\d{1,3}:\d{2}:\d{2}$/', $str)) {
-            return ["Column '{$col['name']}' must be a time in H:i:s format. Got: $value"];
-        }
+        if(!preg_match('/^-?\d{1,3}:\d{2}:\d{2}$/', $str))
+            return self::label($col) . " must be a time as hh:mm:ss.";
 
-        $abs    = ltrim($str, '-');
-        [$h, $i, $s] = explode(':', $abs);
+        [$h, $i, $s] = explode(':', ltrim($str, '-'));
+        if((int)$h > 838 || (int)$i > 59 || (int)$s > 59)
+            return self::label($col) . " must be a time between -838:59:59 and 838:59:59.";
 
-        if ((int)$h > 838 || (int)$i > 59 || (int)$s > 59) {
-            return ["Column '{$col['name']}' time value '$str' is out of MySQL TIME range (-838:59:59 to 838:59:59)."];
-        }
-
-        return [];
+        return '';
     }
 
     // -------------------------------------------------------------------------
     // Bit
     // -------------------------------------------------------------------------
 
-    /** @return string[] */
-    protected static function validateBit(mixed $value, array $col): array {
-        if ($value !== 0 && $value !== 1 && $value !== '0' && $value !== '1') {
-            return ["Column '{$col['name']}' must be 0 or 1 (BIT)."];
-        }
-        return [];
+    protected static function validateBit(mixed $value, array $col): string {
+        if($value !== 0 && $value !== 1 && $value !== '0' && $value !== '1')
+            return self::label($col) . " must be 0 or 1.";
+        return '';
     }
-
 
 }
