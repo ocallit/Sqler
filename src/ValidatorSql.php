@@ -12,7 +12,8 @@ use RuntimeException;
  *
  * Usage:
  *   $validator = new ValidatorSql($sqlExecutor);
- *   $data   = $validator->fix('orders', $_POST);
+ *   $data   = $validator->fixVsTable('orders', $_POST);
+ *   $data   = $validator->fixVsQuery('SELECT ...', $_POST);
  *   $errors = $validator->validateVsTable('orders', $data);          // [colName => userFriendlyError]
  *   $errors = $validator->validateVsQuery('SELECT ...', $data);      // [selectClauseName => userFriendlyError]
  *   $errors = $validator->validateUnique('orders', $data);           // [indexName => userFriendlyError]
@@ -21,8 +22,10 @@ use RuntimeException;
  * Rules:
  *   - DatabaseMetadata is initialized with $sqlExecutor if it was not initialized already.
  *   - Keys in $data that are not columns of the table/query are ignored.
- *   - Values are checked as fix() would leave them: " 1,234.00 " is a valid integer.
+ *   - Values are checked as fixVsTable()/fixVsQuery() would leave them: " 1,234.00 " is a valid integer.
  *   - Source is HTML, so "33" or "3.14" are valid numbers and "3.00" is a valid integer.
+ *   - PHP int/float values, ie from json_decode(), are accepted too: a float is fixed to its exact decimal string,
+ *     3.14 becomes "3.14", 1.0E+25 becomes "10000000000000000000000000", 3.0 in an integer column becomes "3".
  *   - Decimal/integer values are never cast to float; bcmath is used for precision.
  *   - Date strings must be Y-m-d; datetime/timestamp Y-m-d H:i:s (time part completed if missing).
  *   - Time strings must be H:i:s (seconds completed if missing).
@@ -152,20 +155,31 @@ class ValidatorSql {
 
     /**
      * - Numbers that come as strings stay as strings: trimmed and commas removed.
+     * - Numbers that come as float, in numeric columns, become their exact decimal string: 3.14 becomes "3.14".
      * - Integer columns: a zero fractional part is removed, "3.00" becomes "3".
      * - char/varchar are trimmed with SqlUtils::sTrim().
-     * - Fields not in the table or query stay as they are.
+     * - Fields not in the table stay as they are.
      *
-     * @param string $tableNameOrSelectQuery A table name, or a query starting with SELECT, WITH or (
+     * @param string $tableName
      * @param array<string, mixed> $data
      * @return array<string, mixed>
      * @throws Exception
      */
-    public function fix(string $tableNameOrSelectQuery, array $data): array {
-        $columns = preg_match('/^\s*(\(|SELECT\b|WITH\b)/i', $tableNameOrSelectQuery) ?
-          $this->databaseMetadata->query($tableNameOrSelectQuery) :
-          $this->tableColumns($tableNameOrSelectQuery);
-        return $this->fixValues($columns, $data);
+    public function fixVsTable(string $tableName, array $data): array {
+        return $this->fixValues($this->tableColumns($tableName), $data);
+    }
+
+    /**
+     * Same as fixVsTable() for the columns of a select query.
+     * Note: the query is executed to read its metadata, add a LIMIT 0 or WHERE 0 to make it cheap.
+     *
+     * @param string $selectQuery
+     * @param array<string, mixed> $data Keys are select clause names (aliases)
+     * @return array<string, mixed>
+     * @throws Exception
+     */
+    public function fixVsQuery(string $selectQuery, array $data): array {
+        return $this->fixValues($this->databaseMetadata->query($selectQuery), $data);
     }
 
     // -------------------------------------------------------------------------
@@ -213,9 +227,11 @@ class ValidatorSql {
     }
 
     protected static function fixValue(mixed $value, array $col): mixed {
+        $dataType = strtolower($col['data_type'] ?? '');
+        if(is_float($value) && in_array($dataType, ['tinyint', 'smallint', 'int', 'mediumint', 'bigint', 'year', 'decimal', 'numeric', 'float', 'double', 'real'], TRUE))
+            $value = self::floatToDecimal($value);
         if(!is_string($value))
             return $value;
-        $dataType = strtolower($col['data_type'] ?? '');
         switch($dataType) {
             case 'tinyint': case 'smallint': case 'int': case 'mediumint': case 'bigint': case 'year':
                 $value = str_replace(',', '', trim($value));
@@ -226,6 +242,33 @@ class ValidatorSql {
                 return SqlUtils::sTrim($value);
         }
         return $value;
+    }
+
+    /**
+     * The exact decimal string of a float, without exponent: 3.14 => "3.14", 1.0E+25 => "10000000000000000000000000",
+     * 1.0E-5 => "0.00001", 3.0 => "3". INF and NAN return "INF", "-INF", "NAN", not a number when validated.
+     * (string)$float is not used: it rounds to the precision ini setting and may use an exponent.
+     */
+    protected static function floatToDecimal(float $value): string {
+        if(!is_finite($value))
+            return (string)$value;
+        // Shortest string that round-trips: 3.14, 3.0, 1.0E+25, 1.0E-5
+        $str = var_export($value, TRUE);
+        if(!preg_match('/^(-?)(\d+)(?:\.(\d*))?(?:E([+-]?\d+))?$/i', $str, $matches))
+            return $str;
+        $digits = $matches[2] . ($matches[3] ?? '');
+        $point = strlen($matches[2]) + (int)($matches[4] ?? 0);
+        if($point <= 0)
+            $number = '0.' . str_repeat('0', -$point) . $digits;
+        elseif($point >= strlen($digits))
+            $number = $digits . str_repeat('0', $point - strlen($digits));
+        else
+            $number = substr($digits, 0, $point) . '.' . substr($digits, $point);
+        [$intPart, $fraction] = explode('.', $number . '.', 3);
+        $intPart = ltrim($intPart, '0');
+        $fraction = rtrim($fraction, '0');
+        $number = ($intPart === '' ? '0' : $intPart) . ($fraction === '' ? '' : ".$fraction");
+        return $number === '0' ? '0' : $matches[1] . $number;
     }
 
     /**

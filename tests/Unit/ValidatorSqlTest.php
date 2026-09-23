@@ -58,7 +58,7 @@ class ValidatorSqlTest extends TestCase {
 
     #[DataProvider('fixProvider')]
     public function testFix(array $data, array $expected): void {
-        self::assertSame($expected, $this->validator->fix('item', $data));
+        self::assertSame($expected, $this->validator->fixVsTable('item', $data));
     }
 
     public static function fixProvider(): array {
@@ -72,13 +72,17 @@ class ValidatorSqlTest extends TestCase {
           'text untouched' => [['notes' => '  a  '], ['notes' => '  a  ']],
           'not string untouched' => [['qty' => 7, 'ratio' => NULL], ['qty' => 7, 'ratio' => NULL]],
           'unknown field untouched' => [['csrf' => ' x,1 '], ['csrf' => ' x,1 ']],
+          'float to decimal string' => [['price' => 3.14, 'ratio' => 0.1 + 0.2], ['price' => '3.14', 'ratio' => '0.30000000000000004']],
+          'float zero fraction integer' => [['qty' => 3.0, 'item_id' => -5.0], ['qty' => '3', 'item_id' => '-5']],
+          'float exponent expanded' => [['ratio' => 1.0E+25, 'price' => 1.0E-5], ['ratio' => '10000000000000000000000000', 'price' => '0.00001']],
+          'float in non numeric column untouched' => [['code' => 3.14], ['code' => 3.14]],
         ];
     }
 
     public function testFixWithQueryUsesQueryMetadata(): void {
         $this->mockMetadata->expects(self::once())->method('query')
           ->willReturn(['total' => self::col('total', 'bigint', 'bigint')]);
-        self::assertSame(['total' => '12', 'item_id' => ' 3.00'], $this->validator->fix('SELECT SUM(qty) AS total FROM item', ['total' => '12.00', 'item_id' => ' 3.00']));
+        self::assertSame(['total' => '12', 'item_id' => ' 3.00'], $this->validator->fixVsQuery('SELECT SUM(qty) AS total FROM item', ['total' => '12.00', 'item_id' => ' 3.00']));
     }
 
     // validateVsTable
@@ -106,6 +110,9 @@ class ValidatorSqlTest extends TestCase {
           'date format' => [['born' => '01/02/2024'], ['born' => 'Born must be a date as yyyy-mm-dd.']],
           'invalid date' => [['born' => '2023-02-29'], ['born' => 'Born is not a valid date: 2023-02-29.']],
           'datetime invalid time' => [['updated' => '2024-01-01 25:00:00'], ['updated' => 'Updated is not a valid time: 25:00:00.']],
+          'valid php numbers' => [['ratio' => 3.14, 'status' => 'active'], []],
+          'php float with decimals in integer' => [['qty' => 3.14], ['qty' => 'Qty must be a whole number, 3.14 has decimals.']],
+          'php float not finite' => [['ratio' => INF, 'qty' => NAN], ['ratio' => 'Ratio must be a number.', 'qty' => 'Qty must be a whole number.']],
         ];
     }
 
@@ -116,6 +123,8 @@ class ValidatorSqlTest extends TestCase {
           ['qty' => 'Qty must be between -32768 and 32767.', 'price' => 'Price is too large, at most 3 digits before the decimal point.'],
           $this->validator->validateVsTable('item', ['qty' => '32,768', 'price' => '1000'])
         );
+        self::assertSame([], $this->validator->validateVsTable('item', ['item_id' => 7, 'qty' => 3.0, 'price' => 999.99]));
+        self::assertSame(['qty' => 'Qty must be between -32768 and 32767.'], $this->validator->validateVsTable('item', ['qty' => 1.0E+25]));
     }
 
     public function testValidateVsTableUnknownTableThrows(): void {

@@ -274,26 +274,27 @@ class DatabaseMetadata {
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(!isset($this->tableColumns[$dbName][$tableName])) {
             $method = __METHOD__;
+            // Every column aliased: MySQL 8 returns un-aliased information_schema column names in upper case
             $this->tableColumns[$dbName][$tableName] = $this->sqlExecutor->arrayKeyed(
               "SELECT /*$method*/
                         COLUMN_NAME AS name,
-                        data_type,
+                        DATA_TYPE AS data_type,
                         COLUMN_TYPE AS Type, 
                         COLUMN_DEFAULT AS default_value,
-                        is_nullable,
-                        character_maximum_length,
-                        character_octet_length,
-                        numeric_precision,
-                        numeric_scale,
-                        datetime_precision,
+                        IS_NULLABLE AS is_nullable,
+                        CHARACTER_MAXIMUM_LENGTH AS character_maximum_length,
+                        CHARACTER_OCTET_LENGTH AS character_octet_length,
+                        NUMERIC_PRECISION AS numeric_precision,
+                        NUMERIC_SCALE AS numeric_scale,
+                        DATETIME_PRECISION AS datetime_precision,
                         IFNULL(numeric_scale, datetime_precision) as decimals,
-                        column_comment,
-                        generation_expression,
+                        COLUMN_COMMENT AS column_comment,
+                        GENERATION_EXPRESSION AS generation_expression,
                         COLUMN_KEY AS key_type,
-                        extra,
-                        character_set_name,
-                        collation_name,
-                        srs_id
+                        EXTRA AS extra,
+                        CHARACTER_SET_NAME AS character_set_name,
+                        COLLATION_NAME AS collation_name,
+                        SRS_ID AS srs_id
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = $dbName AND TABLE_NAME = ?
                     ORDER BY ORDINAL_POSITION", "name", [$tableName]
