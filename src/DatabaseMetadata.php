@@ -188,7 +188,7 @@ class DatabaseMetadata {
     public static function initialize(SqlExecutor $sql): void {
         if(static::$instance !== NULL)
             throw new RuntimeException(static::class . ' is already initialized.');
-        static::$instance = new static($sql);
+        static::$instance = new DatabaseMetadata($sql);
     }
 
     public static function getInstance(): static {

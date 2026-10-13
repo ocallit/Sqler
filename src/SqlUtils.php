@@ -13,10 +13,12 @@ use function chr;
 class SqlUtils {
     const int JSON_MYSQL_OPTIONS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_BIGINT_AS_STRING;
 
+    protected function __construct() {}
+
     /**
      * Changes a column name to a nice label or title
      *
-     * @pure
+     * @phpstan-pure
      * @param string $fieldName
      * @return string
      */
@@ -27,10 +29,10 @@ class SqlUtils {
     /**
      * Protect with ` backticks for column name to column name respecting . table.column to `table`.`column`
      *
-     * @pure
+     * @phpstan-pure
      * @param string $fieldName
      * @return string The protected field name (e.g., '`table`.`column`').
-     * @pure
+     * @phpstan-pure
      */
     public static function fieldIt(string $fieldName): string {
         $protected = [];
@@ -44,7 +46,7 @@ class SqlUtils {
 
     /**
      * Trim and make multiple spaces with a single space
-     * @pure
+     * @phpstan-pure
      * @param string|int|float|bool|null|Stringable $s
      * @return string
      */
@@ -56,7 +58,7 @@ class SqlUtils {
 
     /**
      *
-     * @pure
+     * @phpstan-pure
      * @param string $comment
      * @return string
      */
@@ -67,7 +69,7 @@ class SqlUtils {
     }
 
     /**
-     * @pure
+     * @phpstan-pure
      * @psalm-pure
      */
     public static function strIt(string|null $str): string {
@@ -85,7 +87,7 @@ class SqlUtils {
      * Creates a template from a SQL query string by replacing literals with '?'.
      * This is a simplified approach for logging or comparison, not a full SQL parser.
      *
-     * @pure
+     * @phpstan-pure
      * @param string $sql The SQL query string.
      * @return string The templated SQL query string.
      */
@@ -141,11 +143,11 @@ class SqlUtils {
      * Supports :name, :key#, and :{arbitrary key}.
      * Ignores placeholders inside quotes, backticks, and SQL comments.
      *
-     * @pure
+     * @phpstan-pure
      * @return array{string, array}
      * @throws InvalidArgumentException If a parameter is missing.
      */
-    function namedToPositional(string $query, array $params): array {
+    public static function  namedToPositional(string $query, array $params): array {
         $values = [];
 
         $pattern = <<<'REGEX'
@@ -180,5 +182,6 @@ REGEX;
 
         return [$sql, $values];
     }
+
 
 }
