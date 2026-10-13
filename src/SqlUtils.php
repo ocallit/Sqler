@@ -3,6 +3,8 @@
 
 namespace Ocallit\Sqler;
 
+use InvalidArgumentException;
+use RuntimeException;
 use \Stringable;
 use function explode;
 use function str_replace;
@@ -23,7 +25,7 @@ class SqlUtils {
     }
 
     /**
-     * Protect with ` backticks a: column name to column name respecting . table.column to `table`.`column`
+     * Protect with ` backticks for column name to column name respecting . table.column to `table`.`column`
      *
      * @pure
      * @param string $fieldName
@@ -40,11 +42,24 @@ class SqlUtils {
         return implode('.', $protected);
     }
 
+    /**
+     * Trim and make multiple spaces with a single space
+     * @pure
+     * @param string|int|float|bool|null|Stringable $s
+     * @return string
+     */
     public static function sTrim(string|int|float|bool|null|Stringable $s):string {
         if($s === NULL)
             return '';
         return trim( preg_replace('/\s\s+/', ' ', (string)$s));
     }
+
+    /**
+     *
+     * @pure
+     * @param string $comment
+     * @return string
+     */
     public static function commentIt(string $comment):string {
         if(empty($comment))
             return "";
@@ -70,6 +85,7 @@ class SqlUtils {
      * Creates a template from a SQL query string by replacing literals with '?'.
      * This is a simplified approach for logging or comparison, not a full SQL parser.
      *
+     * @pure
      * @param string $sql The SQL query string.
      * @return string The templated SQL query string.
      */
@@ -117,6 +133,52 @@ class SqlUtils {
         }
 
         return $sql;
+    }
+
+    /**
+     * Convert named SQL placeholders to mysqli positional placeholders.
+     *
+     * Supports :name, :key#, and :{arbitrary key}.
+     * Ignores placeholders inside quotes, backticks, and SQL comments.
+     *
+     * @pure
+     * @return array{string, array}
+     * @throws InvalidArgumentException If a parameter is missing.
+     */
+    function namedToPositional(string $query, array $params): array {
+        $values = [];
+
+        $pattern = <<<'REGEX'
+~('(?:\\.|''|[^'\\])*'|"(?:\\.|""|[^"\\])*"|`(?:``|[^`])*`|--[ \t][^\r\n]*|\#[^\r\n]*|/\*[\s\S]*?\*/)|:\{([^{}]+)\}|:([A-Za-z0-9_#]+)~
+REGEX;
+
+        $sql = preg_replace_callback(
+          $pattern,
+          static function(array $match) use ($params, &$values): string {
+              // Preserve quoted strings, identifiers, and comments.
+              if($match[1] !== '') {
+                  return $match[0];
+              }
+
+              $key = $match[2] !== '' ? $match[2] : $match[3];
+
+              if(!array_key_exists($key, $params)) {
+                  throw new InvalidArgumentException(
+                    "Missing SQL parameter: $key"
+                  );
+              }
+
+              $values[] = $params[$key];
+
+              return '?';
+          },
+          $query
+        );
+
+        if($sql === NULL)
+            throw new RuntimeException('Could not parse SQL placeholders.');
+
+        return [$sql, $values];
     }
 
 }

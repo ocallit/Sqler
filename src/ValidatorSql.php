@@ -17,8 +17,6 @@ use Exception;
  *
  * Requirements:
  *   - DatabaseMetadata::initialize($sql) must have been called before first use.
- *   - Primary key column(s) must always be present in $data.
- *   - Missing non-PK columns without a default value produce warnings, not errors.
  *   - Source is HTML, so "33" or "3.14" (with .00 fractional) are valid integers.
  *   - Decimal/float values are never cast to float; bcmath is used for precision.
  *   - Date strings must be Y-m-d; datetime/timestamp Y-m-d H:i:s (time part completed if missing).
@@ -77,7 +75,7 @@ class ValidatorSql {
             }
             $colErrors = self::validateValue($value, $columns[$colName]);
             if (!empty($colErrors)) {
-                $errors[$colName] = array_merge($errors[$colName] ?? [], $colErrors);
+                $errors[$colName][] = $colErrors;
             }
         }
 
