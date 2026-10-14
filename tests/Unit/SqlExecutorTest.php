@@ -259,6 +259,36 @@ class SqlExecutorTest extends TestCase {
         }
     }
 
+    public function testCloseConnectionBeforeAnyQueryDoesNotThrow(): void {
+        $this->sqlExecutor->closeConnection();
+
+        self::assertSame(0, $this->sqlExecutor->last_insert_id());
+        self::assertSame(0, $this->sqlExecutor->affected_rows());
+    }
+
+    public function testInsertIdAndAffectedRowsAreZeroWithoutConnection(): void {
+        self::assertSame(0, $this->sqlExecutor->last_insert_id());
+        self::assertSame(0, $this->sqlExecutor->affected_rows());
+    }
+
+    public function testCloseConnectionResetsTransactionState(): void {
+        $connection = $this->createMock(mysqli::class);
+        $connection->method('query')->willReturn(true);
+        $connection->expects(self::once())->method('rollback');
+        $connection->expects(self::once())->method('close');
+        (new ReflectionProperty(SqlExecutor::class, 'mysqli'))->setValue($this->sqlExecutor, $connection);
+        $insideTransaction = new ReflectionProperty(SqlExecutor::class, 'insideTransaction');
+
+        $this->sqlExecutor->begin();
+        self::assertTrue($insideTransaction->getValue($this->sqlExecutor));
+
+        $this->sqlExecutor->closeConnection();
+
+        self::assertFalse($insideTransaction->getValue($this->sqlExecutor));
+        self::assertSame(0, $this->sqlExecutor->last_insert_id());
+        self::assertSame(0, $this->sqlExecutor->affected_rows());
+    }
+
     public function testConnectionFailureIsSaved(): void {
         $sql = $this->getMockBuilder(SqlExecutor::class)->disableOriginalConstructor()->onlyMethods(['connect'])->getMock();
         $sql->method('connect')->willThrowException(new mysqli_sql_exception('Connection failed', 1045));

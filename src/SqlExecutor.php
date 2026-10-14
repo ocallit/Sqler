@@ -35,7 +35,7 @@ use function usleep;
  */
 
 class SqlExecutor {
-    protected mysqli|null $mysqli;
+    protected mysqli|null $mysqli = null;
     protected string $charset = 'utf8mb4';
     protected string $collation = 'utf8mb4_0900_ai_ci';
 
@@ -260,9 +260,9 @@ class SqlExecutor {
      *
      * @return int The ID of the last inserted record.
      */
-    public function last_insert_id(): int {return $this->mysqli->insert_id;}
+    public function last_insert_id(): int {return $this->mysqli?->insert_id ?? 0;}
 
-    public function affected_rows():int {return $this->mysqli->affected_rows;}
+    public function affected_rows():int {return $this->mysqli?->affected_rows ?? 0;}
 
     /**
      * return value of the first column in the first row $default on not found
@@ -853,6 +853,7 @@ class SqlExecutor {
                 );
             } finally {
                 $this->mysqli = null;
+                $this->insideTransaction = false;
             }
         }
     }
