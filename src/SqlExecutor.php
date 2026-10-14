@@ -588,36 +588,70 @@ class SqlExecutor {
     }
 
     /**
-     * @param array $queries
+     * Runs the queries in one transaction. On a deadlock, a lock wait timeout or a lost connection the
+     * transaction is rolled back and restarted from the first query, after a short pause. Any other error
+     * is thrown at once.
+     *
+     * @param array $queries each item: a SQL string, a mysqli_stmt, or ['query' => string, 'parameters' => array]
      * @param string|int $comment
      * @param bool $consistentSnapshot
      * @param bool $readOnly
      * @return void
-     * @throws mysqli_sql_exception
+     * @throws mysqli_sql_exception when it fails, getLastErrorNumber() holds the code.
+     *   Code 2006 or 2013 with the transaction not retried means the connection was lost while COMMIT ran:
+     *   the server may or may not have committed, a caller that cares must check before running it again.
      */
     public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
         $this->lastErrorNumber = 0;
         $attempts = 0;
-        /** @var mysqli_sql_exception|null $astError */
+        /** @var mysqli_sql_exception|null $lastError */
         $lastError = null;
         while(++$attempts <= $this->retries) {
+            $committing = false;
             try {
-                    $this->begin($comment, $consistentSnapshot, $readOnly);
-                    foreach($queries as $query)
+                $this->begin($comment, $consistentSnapshot, $readOnly);
+                foreach($queries as $query)
+                    if(is_array($query))
+                        $this->query($query["query"], $query["parameters"] ?? []);
+                    else
                         $this->query($query);
-                    $this->commit($comment);
-                    $this->lastErrorNumber = 0;
-                    return;
-            } catch(mysqli_sql_exception $e) {
-                /** @var mysqli_sql_exception $lastError */
+                $committing = true;
+                $this->commit($comment);
+                $this->lastErrorNumber = 0;
+                return;
+            } catch(Throwable $e) {
+                try { $this->rollback($comment); } catch(mysqli_sql_exception) {}
+                if(!($e instanceof mysqli_sql_exception))
+                    throw $e;
                 $lastError = $e;
-                $this->rollback($comment);
+                if($this->giveUpTransaction($e, $committing))
+                    break;
+                // A lock wait timeout already waited long enough, the other errors need the competitor
+                // to finish or the server to come back. Jitter keeps two deadlocked clients from colliding again.
+                if($attempts < $this->retries && $e->getCode() !== self::ERROR_LOCK_WAIT_TIMEOUT)
+                    usleep(random_int(10000, 30000) * $attempts);
             }
         }
         $lastError ??= new mysqli_sql_exception("Transaction failed after $attempts attempts");
         // A successful ROLLBACK clears connection errno, but not the failure we report.
         $this->lastErrorNumber = $lastError->getCode();
         throw $lastError;
+    }
+
+    /**
+     * Decides if a failed transaction must give up or be restarted.
+     *
+     * @param mysqli_sql_exception $error
+     * @param bool $committing true when the error was raised by COMMIT itself
+     * @return bool true give up and throw, false rollback done, restart and retry
+     */
+    protected function giveUpTransaction(mysqli_sql_exception $error, bool $committing = false): bool {
+        $code = $error->getCode();
+        // The connection dropped while COMMIT ran: the server may have committed before the reply was lost,
+        // restarting the transaction could apply it twice.
+        if($committing && ($code === self::ERROR_SERVER_GONE || $code === self::ERROR_SERVER_LOST))
+            return true;
+        return !array_key_exists($code, $this->retryOnErrors);
     }
 
     /**

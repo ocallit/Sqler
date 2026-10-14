@@ -127,7 +127,7 @@ class SqlExecutorTest extends TestCase {
         } catch(mysqli_sql_exception $caught) {
             self::assertSame($failure, $caught);
         }
-        self::assertSame(3, $rollbacks);
+        self::assertSame(1, $rollbacks, 'a duplicate key is not retryable: one attempt, one rollback');
         self::assertSame(1062, $this->sqlExecutor->getLastErrorNumber());
         self::assertTrue($this->sqlExecutor->is_last_error_duplicate_key());
 
@@ -178,21 +178,85 @@ class SqlExecutorTest extends TestCase {
         self::assertSame(0, $this->sqlExecutor->getLastErrorNumber());
     }
 
-    public function testRollbackFailureMatchesReportedException(): void {
-        $failure = new mysqli_sql_exception('Rollback failed', 2013);
+    public function testRollbackFailureDoesNotReplaceTheReportedException(): void {
+        $failure = new mysqli_sql_exception('Duplicate entry', 1062);
         $this->connectionWithQueryCallback(static function (string $query) use ($failure) {
-            if($query === 'INSERT fixture') throw new mysqli_sql_exception('Duplicate entry', 1062);
-            if(str_starts_with($query, 'ROLLBACK')) throw $failure;
+            if($query === 'INSERT fixture') throw $failure;
+            if(str_starts_with($query, 'ROLLBACK')) throw new mysqli_sql_exception('Rollback failed', 2013);
             return true;
         });
         try {
             $this->sqlExecutor->transaction(['INSERT fixture']);
-            self::fail('Expected rollback failure.');
+            self::fail('Expected the transaction to fail.');
         } catch(mysqli_sql_exception $caught) {
             self::assertSame($failure, $caught);
         }
+        self::assertSame(1062, $this->sqlExecutor->getLastErrorNumber());
+        self::assertTrue($this->sqlExecutor->is_last_error_duplicate_key());
+    }
+
+    public function testTransactionAcceptsQueryAndParametersItems(): void {
+        $seen = [];
+        $connection = $this->createMock(mysqli::class);
+        $connection->method('query')->willReturn(true);
+        $connection->method('execute_query')->willReturnCallback(static function (string $query, array $parameters) use (&$seen) {
+            $seen[] = [$query, $parameters];
+            return true;
+        });
+        (new ReflectionProperty(SqlExecutor::class, 'mysqli'))->setValue($this->sqlExecutor, $connection);
+
+        $this->sqlExecutor->transaction([['query' => 'INSERT a (x) VALUES (?)', 'parameters' => [7]], ['query' => 'DELETE b']]);
+
+        self::assertSame([['INSERT a (x) VALUES (?)', [7]]], $seen);
+        self::assertSame(0, $this->sqlExecutor->getLastErrorNumber());
+    }
+
+    public function testConnectionLostBeforeCommitIsRetried(): void {
+        $attempts = 0;
+        $this->connectionWithQueryCallback(static function (string $query) use (&$attempts) {
+            if($query === 'UPDATE fixture' && ++$attempts === 1)
+                throw new mysqli_sql_exception('Lost connection', 2013);
+            return true;
+        });
+        $this->sqlExecutor->transaction(['UPDATE fixture']);
+        self::assertSame(2, $attempts);
+        self::assertSame(0, $this->sqlExecutor->getLastErrorNumber());
+    }
+
+    public function testConnectionLostDuringCommitIsNotRetried(): void {
+        $commits = 0;
+        $updates = 0;
+        $this->connectionWithQueryCallback(static function (string $query) use (&$commits, &$updates) {
+            if($query === 'UPDATE fixture') ++$updates;
+            if(str_starts_with($query, 'COMMIT')) {
+                ++$commits;
+                throw new mysqli_sql_exception('Lost connection', 2013);
+            }
+            return true;
+        });
+        try {
+            $this->sqlExecutor->transaction(['UPDATE fixture']);
+            self::fail('Expected the lost COMMIT to be thrown.');
+        } catch(mysqli_sql_exception $caught) {
+            self::assertSame(2013, $caught->getCode());
+        }
+        self::assertSame(1, $commits);
+        self::assertSame(1, $updates, 'running it again could apply it twice');
         self::assertSame(2013, $this->sqlExecutor->getLastErrorNumber());
-        self::assertFalse($this->sqlExecutor->is_last_error_duplicate_key());
+    }
+
+    public function testNonMysqliErrorRollsBackAndIsRethrown(): void {
+        $rollbacks = 0;
+        $this->connectionWithQueryCallback(static function (string $query) use (&$rollbacks) {
+            if(str_starts_with($query, 'ROLLBACK')) ++$rollbacks;
+            return true;
+        });
+        $this->expectException(TypeError::class);
+        try {
+            $this->sqlExecutor->transaction([null]);
+        } finally {
+            self::assertSame(1, $rollbacks);
+        }
     }
 
     public function testConnectionFailureIsSaved(): void {
