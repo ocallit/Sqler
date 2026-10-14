@@ -27,7 +27,7 @@ class QueryBuilder {
     public bool $useNewOnDuplicate = true; // Beginning with MySQL 8.0.19,
 
     protected array $dontQuoteValue = [
-        'IA_UUID()' => 1,
+        'UUID()' => 1, 'IA_UUID()' => 1,
         'CURDATE()'=>1,'CURRENT_DATE()'=>1,'CURRENT_DATE'=>1,'SYSDATE()'=>1,'UTC_DATE()'=>1,
         'CURRENT_DATETIME'=>1,'NOW()'=>1, 'NOW(6)' => 1,
         'CURRENT_TIME()'=>1,'CURRENT_TIME'=>1,'CURTIME()'=>1,'UTC_TIME()'=>1,
@@ -108,6 +108,8 @@ class QueryBuilder {
      * @return array
      */
     public function update(string $table, array $array, array $where = [], string $comment = ''):array {
+        if(empty($array))
+            throw new InvalidArgumentException(__METHOD__ . " needs at least one column to set");
         $set = [];
         $parameters = [];
         foreach($array as $columnName => $value) {
@@ -249,7 +251,11 @@ class QueryBuilder {
             $methodName = $trace[2]['function'] ??  basename($trace[2]['file'] ?? 'GlobalScope');
             return "/*$className::$methodName*/";
         }
-        return "/*" .  str_replace(["/*", "*/"], "", $comment) . "*/";
+        // removing one token can join its neighbours into another: "*" . "*/" . "/" is "*/" again
+        do {
+            $comment = str_replace(["/*", "*/"], "", $comment, $removed);
+        } while($removed > 0);
+        return "/*" . $comment . "*/";
     }
 
 }

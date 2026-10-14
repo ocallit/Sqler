@@ -5,6 +5,7 @@
 namespace Ocallit\Sqler;
 
 use Exception;
+use mysqli_result;
 use RuntimeException;
 
 /**
@@ -182,6 +183,8 @@ class DatabaseMetadata {
         $this->primaryKeys = [];
         $this->uniqueIndexes = [];
         $this->foreignKeys = [];
+        $this->foreignKeysAll = [];
+        $this->foreignKeysDeduced = [];
         $this->checkConstraints = [];
     }
 
@@ -213,7 +216,7 @@ class DatabaseMetadata {
             foreach($this->sqlExecutor->array($sql) as $d)
                 $this->primaryKeys[$dbName][$d['TABLE_NAME']][$d['COLUMN_NAME']] = $d['COLUMN_NAME'];
         }
-        return $this->primaryKeys[$dbName];
+        return $this->primaryKeys[$dbName] ?? [];
     }
 
     /**
@@ -256,7 +259,7 @@ class DatabaseMetadata {
             return $this->uniqueIndexes[$dbName][$tableName] ?? [];
         }
 
-        return $this->uniqueIndexes[$dbName];
+        return $this->uniqueIndexes[$dbName] ?? [];
     }
 
 
@@ -274,30 +277,33 @@ class DatabaseMetadata {
         $dbName = empty($database) ? "DATABASE()" : SqlUtils::strIt($database);
         if(!isset($this->tableColumns[$dbName][$tableName])) {
             $method = __METHOD__;
-            $this->tableColumns[$dbName][$tableName] = $this->sqlExecutor->arrayKeyed(
+            $columns = $this->sqlExecutor->arrayKeyed(
               "SELECT /*$method*/
                         COLUMN_NAME AS name,
-                        data_type,
+                        DATA_TYPE AS data_type,
                         COLUMN_TYPE AS Type, 
                         COLUMN_DEFAULT AS default_value,
-                        is_nullable,
-                        character_maximum_length,
-                        character_octet_length,
-                        numeric_precision,
-                        numeric_scale,
-                        datetime_precision,
-                        IFNULL(numeric_scale, datetime_precision) as decimals,
-                        column_comment,
-                        generation_expression,
+                        IS_NULLABLE AS is_nullable,
+                        CHARACTER_MAXIMUM_LENGTH AS character_maximum_length,
+                        CHARACTER_OCTET_LENGTH AS character_octet_length,
+                        NUMERIC_PRECISION AS numeric_precision,
+                        NUMERIC_SCALE AS numeric_scale,
+                        DATETIME_PRECISION AS datetime_precision,
+                        IFNULL(NUMERIC_SCALE, DATETIME_PRECISION) as decimals,
+                        COLUMN_COMMENT AS column_comment,
+                        GENERATION_EXPRESSION AS generation_expression,
                         COLUMN_KEY AS key_type,
-                        extra,
-                        character_set_name,
-                        collation_name,
-                        srs_id
+                        EXTRA AS extra,
+                        CHARACTER_SET_NAME AS character_set_name,
+                        COLLATION_NAME AS collation_name,
+                        SRS_ID AS srs_id
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = $dbName AND TABLE_NAME = ?
                     ORDER BY ORDINAL_POSITION", "name", [$tableName]
             );
+            if(empty($columns)) // a table that does not exist yet must not be remembered as empty
+                return [];
+            $this->tableColumns[$dbName][$tableName] = $columns;
         }
         return $this->tableColumns[$dbName][$tableName];
     }
@@ -345,12 +351,13 @@ class DatabaseMetadata {
      */
     public function query(string $query, array $parameters = [], string $database = ""): array {
         $mysqliResult = $this->sqlExecutor->result($query, $parameters);
-        if(!$mysqliResult) {
+        if(!($mysqliResult instanceof mysqli_result)) {
             throw new Exception("Failed to get result metadata");
         }
 
         $metadata = [];
         $fields = mysqli_fetch_fields($mysqliResult);
+        $mysqliResult->free();
 
         foreach($fields as $field) {
             $orgDatabase = $database; //@Todo
@@ -450,8 +457,8 @@ class DatabaseMetadata {
             rc.DELETE_RULE AS on_delete_action
         FROM
             INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
-                JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc ON tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA AND tc.TABLE_NAME = kcu.TABLE_NAME
+                JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc ON tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA AND tc.TABLE_NAME = rc.TABLE_NAME
         WHERE
             tc.CONSTRAINT_TYPE = 'FOREIGN KEY' AND tc.TABLE_SCHEMA = $dbName
         ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION";
@@ -598,7 +605,7 @@ class DatabaseMetadata {
             return [];
 
         $fk = $foreignKeys[$columnName];
-        return $this->fetchForeignKeyOptions($fk['referenced_table'], $fk['referenced_column']);
+        return $this->fetchForeignKeyOptions($fk['referenced_table'], $fk['referenced_column'], $database);
     }
 
     /**
@@ -639,10 +646,10 @@ class DatabaseMetadata {
 
         // Only one column - use it as both id and label
         if(count($columns) === 1)
-            return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $referencedColumn);
+            return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $referencedColumn, $database);
 
         $labelColumn = $this->determineLabelColumn($columns, $referencedColumn);
-        return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $labelColumn);
+        return $this->fetchOptionsFromTable($referencedTable, $referencedColumn, $labelColumn, $database);
     }
 
     /**
@@ -692,12 +699,13 @@ class DatabaseMetadata {
      * @param string $table
      * @param string $idColumn
      * @param string $labelColumn
+     * @param string $database, empty the current database
      * @return OptionMap
      */
-    protected function fetchOptionsFromTable(string $table, string $idColumn, string $labelColumn): array {
+    protected function fetchOptionsFromTable(string $table, string $idColumn, string $labelColumn, string $database = ""): array {
         $idCol = SqlUtils::fieldIt($idColumn);
         $labelCol = SqlUtils::fieldIt($labelColumn);
-        $tbl = SqlUtils::fieldIt($table);
+        $tbl = SqlUtils::fieldIt(empty($database) ? $table : "$database.$table");
 
         $sql = "SELECT /*" . __METHOD__ . "*/ $idCol, $labelCol FROM $tbl ORDER BY $labelCol";
         return $this->sqlExecutor->keyValue($sql);

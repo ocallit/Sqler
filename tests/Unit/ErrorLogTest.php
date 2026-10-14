@@ -214,4 +214,25 @@ class ErrorLogTest extends TestCase {
           __FILE__ . ':' . $callerLine . ' ' . self::class . '->testSqlErrorLog()', $error['content']);
     }
 
+    public function testErrorHandlerIgnoresErrorsMaskedByErrorReporting(): void {
+        $previous = error_reporting(E_ALL & ~E_WARNING);
+        try {
+            ErrorLog::errorHandler(E_WARNING, 'suppressed', __FILE__, 1);
+            $this->assertCount(0, ErrorLog::getErrors());
+
+            ErrorLog::errorHandler(E_NOTICE, 'reported', __FILE__, 2);
+            $this->assertCount(1, ErrorLog::getErrors());
+        } finally {
+            error_reporting($previous);
+        }
+    }
+
+    public function testJavascriptErrorsWithNonScalarErrorCode(): void {
+        ErrorLog::javascriptErrors([['file' => 'a.js', 'line' => 3, 'error_code' => ['x'], 'message' => 'm']]);
+
+        $error = array_values(ErrorLog::getErrors())[0];
+        $this->assertSame(ErrorLog::TYPE_JS, $error['error_type']);
+        $this->assertSame('', $error['error_code']);
+    }
+
 }

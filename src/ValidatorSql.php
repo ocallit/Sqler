@@ -54,7 +54,7 @@ class ValidatorSql {
             if (array_key_exists($colName, $data)) {
                 continue;
             }
-            if (isset($primaryKeys[$colName])) {
+            if (($col['key_type'] ?? '') === 'PRI') {
                 continue;
             }
             $hasDefault      = $col['default_value'] !== null;
@@ -75,7 +75,7 @@ class ValidatorSql {
             }
             $colErrors = self::validateValue($value, $columns[$colName]);
             if (!empty($colErrors)) {
-                $errors[$colName][] = $colErrors;
+                array_push($errors[$colName], ...$colErrors);
             }
         }
 
@@ -98,6 +98,10 @@ class ValidatorSql {
 
         if ($value === null || $value === '') {
             if (!$isNullable) {
+                // '' is a real value for a NOT NULL string column
+                if ($value === '' && in_array($dataType, ['char', 'varchar', 'tinytext', 'text', 'mediumtext', 'longtext'], true)) {
+                    return [];
+                }
                 return ["Column '$colName' cannot be null/empty."];
             }
             return [];
@@ -128,6 +132,13 @@ class ValidatorSql {
         };
     }
 
+    /**
+     * Plain decimal notation only: is_numeric() also accepts "1e3", " 5" and "5 ", which bcmath rejects with a ValueError
+     */
+    protected static function isPlainNumber(mixed $value): bool {
+        return is_numeric($value) && preg_match('/^[+-]?(\d+\.?\d*|\.\d+)$/D', (string)$value) === 1;
+    }
+
     // -------------------------------------------------------------------------
     // Integer types
     // -------------------------------------------------------------------------
@@ -136,7 +147,7 @@ class ValidatorSql {
     protected static function validateInteger(mixed $value, array $col): array {
         $colName = $col['name'];
 
-        if (!is_numeric($value)) {
+        if (!self::isPlainNumber($value)) {
             return ["Column '$colName' must be a numeric integer value."];
         }
 
@@ -152,6 +163,9 @@ class ValidatorSql {
 
         // Integer part only (strip any trailing .00)
         $intStr  = str_contains($strVal, '.') ? explode('.', $strVal, 2)[0] : $strVal;
+        if (in_array($intStr, ['', '+', '-'], true)) {
+            $intStr .= '0';  // ".0" has no integer digits, bccomp needs one
+        }
         $dataType = strtolower($col['data_type']);
         $unsigned = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
 
@@ -183,7 +197,7 @@ class ValidatorSql {
     protected static function validateDecimal(mixed $value, array $col): array {
         $colName = $col['name'];
 
-        if (!is_numeric($value)) {
+        if (!self::isPlainNumber($value)) {
             return ["Column '$colName' must be a numeric value."];
         }
 
@@ -192,8 +206,9 @@ class ValidatorSql {
         $unsigned  = str_contains(strtolower($col['Type'] ?? ''), 'unsigned');
         $strVal    = (string)$value;
 
-        // Round to defined scale without converting to float
-        $rounded = bcadd($strVal, '0', $scale);
+        // Round half away from zero to the defined scale, as MySQL does, without converting to float
+        $half    = '0.' . str_repeat('0', $scale) . '5';
+        $rounded = bcadd($strVal, str_starts_with($strVal, '-') ? "-$half" : $half, $scale);
 
         if ($unsigned && bccomp($rounded, '0') < 0) {
             return ["Column '$colName' must be non-negative (unsigned decimal)."];
@@ -234,9 +249,11 @@ class ValidatorSql {
         if ($maxLen === null) {
             return [];
         }
-        $len = mb_strlen((string)$value, 'UTF-8');
+        $isTextType = in_array(strtolower($col['data_type'] ?? ''), ['tinytext', 'text', 'mediumtext', 'longtext'], true);
+        // text types are limited in bytes, char and varchar in characters
+        $len = $isTextType ? strlen((string)$value) : mb_strlen((string)$value, 'UTF-8');
         if ($len > (int)$maxLen) {
-            return ["Column '{$col['name']}' exceeds maximum length of $maxLen characters (got $len)."];
+            return ["Column '{$col['name']}' exceeds maximum length of $maxLen " . ($isTextType ? 'bytes' : 'characters') . " (got $len)."];
         }
         return [];
     }
@@ -301,6 +318,9 @@ class ValidatorSql {
     protected static function validateDateTime(mixed $value, array $col): array {
         $str = (string)$value;
 
+        // Fractional seconds (DATETIME(n)) are valid, validate the rest
+        $str = preg_replace('/(\d{2}:\d{2}:\d{2})\.\d{1,6}$/', '$1', $str);
+
         // Complete missing time parts
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
             $str .= ' 00:00:00';
@@ -337,6 +357,9 @@ class ValidatorSql {
     /** @return string[] */
     protected static function validateTime(mixed $value, array $col): array {
         $str = (string)$value;
+
+        // Fractional seconds (TIME(n)) are valid, validate the rest
+        $str = preg_replace('/(\d{2}:\d{2}:\d{2})\.\d{1,6}$/', '$1', $str);
 
         // Complete missing seconds
         if (preg_match('/^-?\d{1,3}:\d{2}$/', $str)) {
