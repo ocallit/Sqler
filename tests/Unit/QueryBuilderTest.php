@@ -107,11 +107,11 @@ class QueryBuilderTest extends TestCase {
             'INSERT /*c*/  INTO `t`(`a`)  VALUES(?)',
             ['NOW ()'],
           ],
-            // the class docblock advertises UUID(), but the list only holds IA_UUID()
-          'plain_uuid_is_not_in_the_magic_list' => [
+            // the class docblock advertises UUID(), so it is in the magic list next to IA_UUID()
+          'plain_uuid_is_in_the_magic_list' => [
             't', ['a' => 'UUID()'], FALSE, [], [], 'c',
-            'INSERT /*c*/  INTO `t`(`a`)  VALUES(?)',
-            ['UUID()'],
+            'INSERT /*c*/  INTO `t`(`a`)  VALUES(UUID())',
+            [],
           ],
           'ia_uuid_is_in_the_magic_list' => [
             't', ['a' => 'IA_UUID()'], FALSE, [], [], 'c',
@@ -962,6 +962,18 @@ class QueryBuilderTest extends TestCase {
 
 
 
+
+    public function testCommentCannotCloseItselfWithOverlappingTokens(): void {
+        $query = $this->queryBuilder->insert('t', ['a' => 1], FALSE, [], [], 'x**//y');
+
+        $this->assertSame(1, substr_count($query['query'], '*/'));
+    }
+
+    public function testUpdateWithoutColumnsThrows(): void {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->queryBuilder->update('t', [], ['id' => 1]);
+    }
 
     // ---- cross method consistency ----
 

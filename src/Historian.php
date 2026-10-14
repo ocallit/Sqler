@@ -5,6 +5,7 @@
 namespace Ocallit\Sqler;
 
 use Exception;
+use InvalidArgumentException;
 use function array_diff;
 use function array_key_exists;
 use function array_merge;
@@ -90,7 +91,7 @@ class Historian {
           'action' => $action,
           'motive' => $motive,
           'pk' => $this->primaryKeyEncode($primaryKeys),
-          'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS),
+          'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS | JSON_THROW_ON_ERROR),
           'user_nick' => empty($userNick) ? ($_SESSION[self::$SessionNickKey] ?? '?') : $userNick,
           'date' => 'NOW(6)'
         ];
@@ -99,12 +100,18 @@ class Historian {
         try {
             $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
             return;
-        } catch (Exception) { }
-        if($this->sqlExecutor->is_last_error_table_not_found())
-            try {
-                $this-> historyTableCreate();
-                $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
-            } catch (Exception) {}
+        } catch (Exception $e) {
+            if(!$this->sqlExecutor->is_last_error_table_not_found()) {
+                ErrorLog::log($e);
+                return;
+            }
+        }
+        try {
+            $this->historyTableCreate();
+            $this->sqlExecutor->query($insertHistorySql['query'], $insertHistorySql['parameters']);
+        } catch (Exception $e) {
+            ErrorLog::log($e);
+        }
     }
 
     /**
@@ -126,7 +133,7 @@ class Historian {
         $params = [ 
           $this->primaryKeyEncode($primaryKeyValues),
           $offset,
-          $rows  
+          $rows + 1 // diff() compares each row with the next older one, the extra row is only compared against
         ];
         $method = __METHOD__;
         $sql = "SELECT /*$method*/ history_id, `action`, `date`, `user_nick`, `record`, `motive` 
@@ -203,19 +210,31 @@ class Historian {
             $html .= '<tr>' . '<td class="cen">' . $change['date'] . '<br>' . $change['action'] . '<br>' . $change['user_nick'] .
                 '<td><table><thead><tr><th> <th>Era<th>Cambio A:</tr></thead><tbody>';
                 foreach ($change['diff'] as $field => $diffData) {
-                    $before = is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'];
-                    $after = is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'];
-                    $html .= '<tr><td>' . SqlUtils::toLabel($field) . '<td>' . $before . '<td>' . $after . '</table>';
+                    if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData)) {
+                        // nested record, differ() returned [subField => [before, after]]
+                        $side = static fn(string $which): string => json_encode(array_map(
+                          static fn($d) => is_array($d) && array_key_exists($which, $d) ? $d[$which] : $d, $diffData
+                        ), JSON_UNESCAPED_UNICODE);
+                        $before = $side('before');
+                        $after = $side('after');
+                    } else {
+                        $before = is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'];
+                        $after = is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'];
+                    }
+                    $html .= '<tr><td>' . SqlUtils::toLabel($field) . '<td>' . $before . '<td>' . $after;
                 }
+                $html .= '</tbody></table>';
         }
         return  $html . '</tbody></table>';
     }
 
     protected function primaryKeyEncode(array $values):string {
         $pkValues = [];
-        foreach($this->primaryKeys as $primaryKey)
-            if(array_key_exists($primaryKey, $values))
-                $pkValues[] = $values[$primaryKey];
+        foreach($this->primaryKeys as $primaryKey) {
+            if(!array_key_exists($primaryKey, $values))
+                throw new InvalidArgumentException(__METHOD__ . " primary key '$primaryKey' missing for table $this->table");
+            $pkValues[] = $values[$primaryKey];
+        }
         return implode("\t" ,$pkValues);
     }
 
@@ -228,8 +247,11 @@ class Historian {
         foreach($keysToCheck as $key) {
             $beforeValue = $before[$key] ?? null;
             $afterValue = $after[$key] ?? null;
-            if(is_array($beforeValue) && is_array($afterValue))
-                $diff[$key] = $this->differ($beforeValue, $afterValue);
+            if(is_array($beforeValue) && is_array($afterValue)) {
+                $nested = $this->differ($beforeValue, $afterValue);
+                if(!empty($nested))
+                    $diff[$key] = $nested;
+            }
             elseif($beforeValue !== $afterValue)
                 $diff[$key] = ['before' => $beforeValue, 'after' => $afterValue];
         }

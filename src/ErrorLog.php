@@ -126,6 +126,7 @@ class ErrorLog {
             $file = (string)($error['file'] ?? $error['filename'] ?? '');
             $lineNumber = (int)($error['line_number'] ?? $error['line'] ?? 0);
             $errorCode = $error['error_code'] ?? $error['code'] ?? '';
+            $errorCode = is_scalar($errorCode) ? (string)$errorCode : '';
             self::add(self::TYPE_JS, self::hashIt($file, $lineNumber, self::TYPE_JS, $errorCode), [
               'error_code' => $errorCode,
               'error_message' => (string)($error['error_message'] ?? $error['message'] ?? ''),
@@ -210,15 +211,18 @@ class ErrorLog {
      * @return bool false to let php's internal handler run when there was no previous handler
      */
     public static function errorHandler(int $errorNumber, string $errorMessage, string $file = '', int $lineNumber = 0): bool {
-        $frames = self::callerFrames();
-        self::add(self::TYPE_PHP, self::hashIt($file, $lineNumber, self::TYPE_PHP, $errorNumber), [
-          'error_code' => $errorNumber,
-          'error_message' => $errorMessage,
-          'file' => $file,
-          'line_number' => $lineNumber,
-          'function_name' => self::functionIt($frames),
-          'content' => self::traceIt($frames),
-        ]);
+        // @-suppressed and masked errors are not errors to record, they would also use up $maxPerType
+        if(error_reporting() & $errorNumber) {
+            $frames = self::callerFrames();
+            self::add(self::TYPE_PHP, self::hashIt($file, $lineNumber, self::TYPE_PHP, $errorNumber), [
+              'error_code' => $errorNumber,
+              'error_message' => $errorMessage,
+              'file' => $file,
+              'line_number' => $lineNumber,
+              'function_name' => self::functionIt($frames),
+              'content' => self::traceIt($frames),
+            ]);
+        }
         if(self::$previousErrorHandler !== null)
             return (bool)call_user_func(self::$previousErrorHandler, $errorNumber, $errorMessage, $file, $lineNumber);
         return false;
@@ -482,7 +486,8 @@ class ErrorLog {
         if($host === '')
             return self::server('REQUEST_URI');
         /** @noinspection HttpUrlsUsage */
-        return (self::server('HTTPS') === '' ? 'http://' : 'https://') . $host . self::server('REQUEST_URI');
+        $https = strtolower(self::server('HTTPS'));
+        return (($https === '' || $https === 'off') ? 'http://' : 'https://') . $host . self::server('REQUEST_URI');
     }
 
     /**

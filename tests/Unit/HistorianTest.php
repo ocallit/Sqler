@@ -59,6 +59,43 @@ class HistorianTest extends TestCase {
         self::assertSame(['before' => 1, 'after' => 2], $changes[1]['diff']['value']);
     }
 
+    public function testGetChangesFetchesOneExtraRowToCompareTheOldestOne(): void {
+        $this->mockSqlExecutor->expects(self::once())->method('arrayKeyed')
+          ->with(self::anything(), 'history_id', ['1', 0, 101])->willReturn([]);
+
+        $this->historian->getChanges(['test_table_id' => 1]);
+    }
+
+    public function testEqualNestedArraysAreNotAChange(): void {
+        $metadata = ['action' => 'update', 'motive' => '', 'date' => '2026-09-07 10:00:00', 'user_nick' => 'tester'];
+        $this->mockSqlExecutor->method('arrayKeyed')->willReturn([
+            2 => $metadata + ['history_id' => 2, 'record' => '{"items":[{"a":1}],"x":1}'],
+            1 => $metadata + ['history_id' => 1, 'record' => '{"items":[{"a":1}],"x":1}'],
+        ]);
+
+        self::assertSame([], $this->historian->getChanges(['test_table_id' => 1]));
+    }
+
+    public function testNestedChangeIsRenderedAndKeepsOneInnerTable(): void {
+        $metadata = ['action' => 'update', 'motive' => '', 'date' => '2026-09-07 10:00:00', 'user_nick' => 'tester'];
+        $this->mockSqlExecutor->method('arrayKeyed')->willReturn([
+            2 => $metadata + ['history_id' => 2, 'record' => '{"items":{"a":2},"x":2}'],
+            1 => $metadata + ['history_id' => 1, 'record' => '{"items":{"a":1},"x":1}'],
+        ]);
+
+        $html = $this->historian->changesAsHTML($this->historian->getChanges(['test_table_id' => 1]));
+
+        self::assertStringContainsString('{"a":1}', $html);
+        self::assertStringContainsString('{"a":2}', $html);
+        self::assertSame(2, substr_count($html, '</table>'));
+    }
+
+    public function testRegisterRejectsMissingPrimaryKey(): void {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->historian->register('insert', ['other_id' => 1], []);
+    }
+
     public static function accentedHistoryProvider(): array {
         return [
             'literal composed' => ['{"name":"Á","nested":{"name":"Á"}}'],
