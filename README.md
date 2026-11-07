@@ -282,7 +282,9 @@ try {
     $sql->query($query, $params);
 } catch (mysqli_sql_exception $e) {
     // Check right away: the next call resets getLastErrorNumber(). $e->getCode() is the same code.
-    if ($sql->is_last_error_duplicate_key()) {
+    if ($sql->isCommitOutcomeUnknown()) {
+        // error during commit: it may or may not have been committed, check the database before re-running
+    } elseif ($sql->is_last_error_duplicate_key()) {
         // business: already exists
     } elseif ($sql->is_last_error_invalid_foreign_key()) {
         // business: parent row missing
@@ -306,8 +308,8 @@ Things the caller must know:
 - `query()` returns `true` for DML. An UPDATE matching 0 rows is not an error: check `affected_rows()`.
 - `last_insert_id()` is `0` when nothing was inserted. With `ON DUPLICATE KEY UPDATE` it only returns
   the key if you use `id = LAST_INSERT_ID(id)`.
-- Code 2006/2013 thrown by `transaction()` while `COMMIT` ran means the outcome is unknown:
-  check the database before running it again.
+- Code 2006/2013 thrown while `COMMIT` ran means the outcome is unknown: `isCommitOutcomeUnknown()` is true
+  and the transaction was not retried. Check the database before running it again. `rollback()` does not clear it.
 - Parameters must be a list array (`[1, 'a']`), not named keys, or `\ValueError` is thrown.
 
 ## License
