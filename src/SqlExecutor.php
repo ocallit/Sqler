@@ -86,6 +86,16 @@ class SqlExecutor {
     protected const int ERROR_SSL_CONNECTION = 2026;
     protected const int ERROR_PACKET_TOO_LARGE = 2020;
 
+    // Connection establishment error constants
+    protected const int ERROR_TOO_MANY_CONNECTIONS = 1040;
+    protected const int ERROR_DB_ACCESS_DENIED = 1044;     // user has no access to the database
+    protected const int ERROR_ACCESS_DENIED = 1045;        // bad user or password
+    protected const int ERROR_UNKNOWN_DATABASE = 1049;
+    protected const int ERROR_HOST_NOT_ALLOWED = 1130;
+    protected const int ERROR_CONNECT_FAILED = 2002;       // can't connect through socket / connection refused
+    protected const int ERROR_CONN_HOST_ERROR = 2003;      // can't connect to host:port
+    protected const int ERROR_UNKNOWN_HOST = 2005;
+
     // Table and constraint error constants
     protected const int ERROR_TABLE_NOT_FOUND = 1146;
     protected const int ERROR_NO_SUCH_TABLE = 1051;
@@ -178,6 +188,12 @@ class SqlExecutor {
      */
     protected bool $insideTransaction = false;
 
+    /**
+     * True when the most recent COMMIT failed with 2006/2013: the server may or may not have committed.
+     * See isCommitOutcomeUnknown().
+     */
+    protected bool $commitOutcomeUnknown = false;
+
 
     /**
      *
@@ -204,8 +220,12 @@ class SqlExecutor {
     }
 
     /**
+     * Opens the connection, trying up to $retries times with $retrySleep microseconds between attempts.
+     * Under MYSQLI_REPORT_STRICT real_connect() throws instead of returning false, so each attempt is caught here.
+     *
      * @return void
-     * @throws mysqli_sql_exception
+     * @throws mysqli_sql_exception getCode() is the mysqli connect errno (see is_last_error_connect()),
+     *   0 when setting an option failed
      */
     protected function connect():void {
         $this->mysqli = new mysqli();
@@ -214,20 +234,39 @@ class SqlExecutor {
                 throw new mysqli_sql_exception("Setting $option $value failed");
             }
         $attempts = 0;
+        /** @var mysqli_sql_exception|null $lastError */
+        $lastError = null;
         while(++$attempts <= $this->retries) {
-            if($this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
-              $this->connect['password'], $this->connect['database'], $this->connect['port'],
-              $this->connect['socket'], $this->connect['flags'])) {
+            try {
+                $connected = $this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
+                  $this->connect['password'], $this->connect['database'], $this->connect['port'],
+                  $this->connect['socket'], $this->connect['flags']);
+            } catch(mysqli_sql_exception $error) {
+                $lastError = $error;
+                $connected = false;
+            }
+            if($connected) {
                 $this->mysqli->set_charset($this->charset);
                 // $charset = SqlUtils::strIt($this->charset);
                 // $collation = SqlUtils::strIt($this->collation);
                 $this->query( "SET NAMES $this->charset COLLATE $this->collation");
                 return;
             }
+            if($attempts < $this->retries)
+                usleep($this->retrySleep);
         }
-        throw new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
+        // A mysqli that never connected is not null: the next call would skip connect() and fail with \Error.
+        $this->mysqli = null;
+        // Without strict reporting real_connect() returns false: the code must still reach the caller.
+        throw $lastError ?? new mysqli_sql_exception(
+          'Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error(), mysqli_connect_errno());
     }
 
+    /**
+     * Same as query() but returns the raw result of runSql (mysqli_result is not fetched nor freed).
+     *
+     * @throws mysqli_sql_exception
+     */
     public function execute(string|mysqli_stmt $query, array $parameters = []): bool|array {
         return $this->runSql($query, $parameters);
     }
@@ -257,6 +296,8 @@ class SqlExecutor {
     /**
      * Retrieves the ID of the last inserted auto increment record.
      * use ON DUPLICATE KEY ... primary_key = LAST_INSERT_ID(primary_key);
+     * Reminder: with INSERT ... ON DUPLICATE KEY UPDATE, when the row is updated instead of inserted
+     * this only returns the key if the UPDATE clause uses LAST_INSERT_ID(id), otherwise it is 0 or stale.
      *
      * @return int The ID of the last inserted record.
      */
@@ -269,9 +310,11 @@ class SqlExecutor {
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
-     * @param string|null|bool $default
-     * @return string|null|bool
+     * @param string|null|bool $default returned when no row matches; to tell "no row" from a column value
+     *   it must be a value the column can never hold; if nullable use row() and test for [] instead
+     * @return string|null|bool scalar value of the first column
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function firstValue(string|mysqli_stmt $query, array $parameters = [], string|null|bool $default = ""):string|null|bool {
         $this->lastErrorNumber = 0;
@@ -293,6 +336,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -315,6 +359,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function arrayKeyed(string|mysqli_stmt $query, string $key, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -337,6 +382,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -359,6 +405,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -389,6 +436,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -439,6 +487,7 @@ class SqlExecutor {
      * @param array $default
      * @return array Multi-dimensional array using all but last column as keys, last column as values
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
        $this->lastErrorNumber = 0;
@@ -488,6 +537,7 @@ class SqlExecutor {
      * @param array $default
      * @return array Multi-dimensional array with last field values accumulated in arrays
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -538,6 +588,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function keyValue(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         $this->lastErrorNumber = 0;
@@ -559,6 +610,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function vector(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         $this->lastErrorNumber = 0;
@@ -592,17 +644,31 @@ class SqlExecutor {
      * transaction is rolled back and restarted from the first query, after a short pause. Any other error
      * is thrown at once.
      *
+     * If it throws and isCommitOutcomeUnknown() is true, the transaction was NOT retried and may have been committed.
+     * Transaction support is only offered through begin()/commit()/rollback() and this method: a raw
+     * query("START TRANSACTION") is outside the contract (COMMIT could be rerun on a fresh connection).
+     *
+     * getLastErrorNumber() contract, DO NOT "simplify" (rollback() runs through runSql, which resets it to 0):
+     *  - success: 0, even when earlier attempts failed and were retried; those errors live only in getErrorLog().
+     *    Every attempt starts clean: the reset at the top and in begin() are intentional.
+     *  - failure: the code of the final mysqli_sql_exception, assigned again right before the throw because the
+     *    ROLLBACK that preceded it wiped it. Removing that assignment makes the failure report 0.
+     *  - a non mysqli_sql_exception Throwable is rethrown as is and leaves 0; do not read it then.
+     *
      * @param array $queries each item: a SQL string, a mysqli_stmt, or ['query' => string, 'parameters' => array]
      * @param string|int $comment
      * @param bool $consistentSnapshot
-     * @param bool $readOnly
+     * @param bool|null $readOnly false: READ WRITE (default), true: READ ONLY, null: no clause, the session default applies
      * @return void
+     * @throws \Random\RandomException if random_int() finds no entropy for the retry pause
+     * @throws \Throwable any non mysqli_sql_exception raised by a query is rethrown after ROLLBACK, getLastErrorNumber() is 0
      * @throws mysqli_sql_exception when it fails, getLastErrorNumber() holds the code.
      *   Code 2006 or 2013 with the transaction not retried means the connection was lost while COMMIT ran:
      *   the server may or may not have committed, a caller that cares must check before running it again.
      */
-    public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
+    public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, ?bool $readOnly = false):void {
         $this->lastErrorNumber = 0;
+        $this->commitOutcomeUnknown = false;
         $attempts = 0;
         /** @var mysqli_sql_exception|null $lastError */
         $lastError = null;
@@ -660,18 +726,19 @@ class SqlExecutor {
      *
      * @param string|int $comment
      * @param bool $consistentSnapshot
-     * @param bool $readOnly
+     * @param bool|null $readOnly false: READ WRITE (default), true: READ ONLY, null: no clause, the session default applies
      * @return void
      * @throws mysqli_sql_exception
      */
-    public function begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void {
+    public function begin(string|int $comment = '', bool $consistentSnapshot = false, ?bool $readOnly = false): void {
         $result = true;
+        $this->commitOutcomeUnknown = false;
         try {
             $modes = [];
             if ($consistentSnapshot)
                 $modes[] = "WITH CONSISTENT SNAPSHOT";
-            if ($readOnly)
-                $modes[] =  "READ ONLY";
+            if ($readOnly !== null)
+                $modes[] = $readOnly ? "READ ONLY" : "READ WRITE";
             $comment = SqlUtils::commentIt($comment);
             $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
             $this->insideTransaction = true;
@@ -693,8 +760,13 @@ class SqlExecutor {
     public function commit(string|int $comment = ''): void {
         $result = true;
         $comment = SqlUtils::commentIt($comment);
+        $this->commitOutcomeUnknown = false;
         try {
             $result = $this->runSql("COMMIT /*$comment*/");
+        } catch(mysqli_sql_exception $e) {
+            $this->commitOutcomeUnknown = $e->getCode() === self::ERROR_SERVER_GONE
+              || $e->getCode() === self::ERROR_SERVER_LOST;
+            throw $e;
         } finally {
             // State reset happens regardless of exception
             $this->insideTransaction = false;
@@ -721,6 +793,19 @@ class SqlExecutor {
     }
 
     /**
+     * True when the most recent COMMIT failed with 2006/2013: the server may or may not have committed.
+     * Describes that COMMIT only. rollback() does not clear it (the rollback ran on a dead connection and proves
+     * nothing, and transaction() rolls back before throwing). begin(), commit() and transaction() reset it.
+     * The caller must check the database before running the work again.
+     *
+     * @pure
+     * @return bool
+     */
+    public function isCommitOutcomeUnknown(): bool {
+        return $this->commitOutcomeUnknown;
+    }
+
+    /**
      * Return the last reported SQL error code, or 0 after a successful operation.
      *
      * @pure
@@ -728,6 +813,26 @@ class SqlExecutor {
      */
     public function getLastErrorNumber(): int {
         return $this->lastErrorNumber;
+    }
+
+    /**
+     * Checks if the last error was a failure to establish the connection: refused, unknown host,
+     * bad credentials, unknown database, too many connections.
+     * 2006 and 2013 (connection lost while running) are NOT included, they are retried by this class.
+     * @pure
+     * @return bool True if the last error was a connect error
+     */
+    public function is_last_error_connect(): bool {
+        return in_array($this->lastErrorNumber, [
+          SqlExecutor::ERROR_TOO_MANY_CONNECTIONS,
+          SqlExecutor::ERROR_DB_ACCESS_DENIED,
+          SqlExecutor::ERROR_ACCESS_DENIED,
+          SqlExecutor::ERROR_UNKNOWN_DATABASE,
+          SqlExecutor::ERROR_HOST_NOT_ALLOWED,
+          SqlExecutor::ERROR_CONNECT_FAILED,
+          SqlExecutor::ERROR_CONN_HOST_ERROR,
+          SqlExecutor::ERROR_UNKNOWN_HOST
+        ], true);
     }
 
     /**
