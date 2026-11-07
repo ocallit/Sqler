@@ -188,6 +188,12 @@ class SqlExecutor {
      */
     protected bool $insideTransaction = false;
 
+    /**
+     * True when the most recent COMMIT failed with 2006/2013: the server may or may not have committed.
+     * See isCommitOutcomeUnknown().
+     */
+    protected bool $commitOutcomeUnknown = false;
+
 
     /**
      *
@@ -638,6 +644,10 @@ class SqlExecutor {
      * transaction is rolled back and restarted from the first query, after a short pause. Any other error
      * is thrown at once.
      *
+     * If it throws and isCommitOutcomeUnknown() is true, the transaction was NOT retried and may have been committed.
+     * Transaction support is only offered through begin()/commit()/rollback() and this method: a raw
+     * query("START TRANSACTION") is outside the contract (COMMIT could be rerun on a fresh connection).
+     *
      * getLastErrorNumber() contract, DO NOT "simplify" (rollback() runs through runSql, which resets it to 0):
      *  - success: 0, even when earlier attempts failed and were retried; those errors live only in getErrorLog().
      *    Every attempt starts clean: the reset at the top and in begin() are intentional.
@@ -658,6 +668,7 @@ class SqlExecutor {
      */
     public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
         $this->lastErrorNumber = 0;
+        $this->commitOutcomeUnknown = false;
         $attempts = 0;
         /** @var mysqli_sql_exception|null $lastError */
         $lastError = null;
@@ -721,6 +732,7 @@ class SqlExecutor {
      */
     public function begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void {
         $result = true;
+        $this->commitOutcomeUnknown = false;
         try {
             $modes = [];
             if ($consistentSnapshot)
@@ -748,8 +760,13 @@ class SqlExecutor {
     public function commit(string|int $comment = ''): void {
         $result = true;
         $comment = SqlUtils::commentIt($comment);
+        $this->commitOutcomeUnknown = false;
         try {
             $result = $this->runSql("COMMIT /*$comment*/");
+        } catch(mysqli_sql_exception $e) {
+            $this->commitOutcomeUnknown = $e->getCode() === self::ERROR_SERVER_GONE
+              || $e->getCode() === self::ERROR_SERVER_LOST;
+            throw $e;
         } finally {
             // State reset happens regardless of exception
             $this->insideTransaction = false;
@@ -773,6 +790,19 @@ class SqlExecutor {
             $this->insideTransaction = false;
             $this->freeResult($result);
         }
+    }
+
+    /**
+     * True when the most recent COMMIT failed with 2006/2013: the server may or may not have committed.
+     * Describes that COMMIT only. rollback() does not clear it (the rollback ran on a dead connection and proves
+     * nothing, and transaction() rolls back before throwing). begin(), commit() and transaction() reset it.
+     * The caller must check the database before running the work again.
+     *
+     * @pure
+     * @return bool
+     */
+    public function isCommitOutcomeUnknown(): bool {
+        return $this->commitOutcomeUnknown;
     }
 
     /**
