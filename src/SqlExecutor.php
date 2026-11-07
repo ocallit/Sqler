@@ -86,6 +86,16 @@ class SqlExecutor {
     protected const int ERROR_SSL_CONNECTION = 2026;
     protected const int ERROR_PACKET_TOO_LARGE = 2020;
 
+    // Connection establishment error constants
+    protected const int ERROR_TOO_MANY_CONNECTIONS = 1040;
+    protected const int ERROR_DB_ACCESS_DENIED = 1044;     // user has no access to the database
+    protected const int ERROR_ACCESS_DENIED = 1045;        // bad user or password
+    protected const int ERROR_UNKNOWN_DATABASE = 1049;
+    protected const int ERROR_HOST_NOT_ALLOWED = 1130;
+    protected const int ERROR_CONNECT_FAILED = 2002;       // can't connect through socket / connection refused
+    protected const int ERROR_CONN_HOST_ERROR = 2003;      // can't connect to host:port
+    protected const int ERROR_UNKNOWN_HOST = 2005;
+
     // Table and constraint error constants
     protected const int ERROR_TABLE_NOT_FOUND = 1146;
     protected const int ERROR_NO_SUCH_TABLE = 1051;
@@ -204,8 +214,12 @@ class SqlExecutor {
     }
 
     /**
+     * Opens the connection, trying up to $retries times with $retrySleep microseconds between attempts.
+     * Under MYSQLI_REPORT_STRICT real_connect() throws instead of returning false, so each attempt is caught here.
+     *
      * @return void
-     * @throws mysqli_sql_exception
+     * @throws mysqli_sql_exception getCode() is the mysqli connect errno (see is_last_error_connect()),
+     *   0 when setting an option failed
      */
     protected function connect():void {
         $this->mysqli = new mysqli();
@@ -214,18 +228,32 @@ class SqlExecutor {
                 throw new mysqli_sql_exception("Setting $option $value failed");
             }
         $attempts = 0;
+        /** @var mysqli_sql_exception|null $lastError */
+        $lastError = null;
         while(++$attempts <= $this->retries) {
-            if($this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
-              $this->connect['password'], $this->connect['database'], $this->connect['port'],
-              $this->connect['socket'], $this->connect['flags'])) {
+            try {
+                $connected = $this->mysqli->real_connect($this->connect['hostname'], $this->connect['username'],
+                  $this->connect['password'], $this->connect['database'], $this->connect['port'],
+                  $this->connect['socket'], $this->connect['flags']);
+            } catch(mysqli_sql_exception $error) {
+                $lastError = $error;
+                $connected = false;
+            }
+            if($connected) {
                 $this->mysqli->set_charset($this->charset);
                 // $charset = SqlUtils::strIt($this->charset);
                 // $collation = SqlUtils::strIt($this->collation);
                 $this->query( "SET NAMES $this->charset COLLATE $this->collation");
                 return;
             }
+            if($attempts < $this->retries)
+                usleep($this->retrySleep);
         }
-        throw new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
+        // A mysqli that never connected is not null: the next call would skip connect() and fail with \Error.
+        $this->mysqli = null;
+        // Without strict reporting real_connect() returns false: the code must still reach the caller.
+        throw $lastError ?? new mysqli_sql_exception(
+          'Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error(), mysqli_connect_errno());
     }
 
     /**
@@ -610,6 +638,13 @@ class SqlExecutor {
      * transaction is rolled back and restarted from the first query, after a short pause. Any other error
      * is thrown at once.
      *
+     * getLastErrorNumber() contract, DO NOT "simplify" (rollback() runs through runSql, which resets it to 0):
+     *  - success: 0, even when earlier attempts failed and were retried; those errors live only in getErrorLog().
+     *    Every attempt starts clean: the reset at the top and in begin() are intentional.
+     *  - failure: the code of the final mysqli_sql_exception, assigned again right before the throw because the
+     *    ROLLBACK that preceded it wiped it. Removing that assignment makes the failure report 0.
+     *  - a non mysqli_sql_exception Throwable is rethrown as is and leaves 0; do not read it then.
+     *
      * @param array $queries each item: a SQL string, a mysqli_stmt, or ['query' => string, 'parameters' => array]
      * @param string|int $comment
      * @param bool $consistentSnapshot
@@ -748,6 +783,26 @@ class SqlExecutor {
      */
     public function getLastErrorNumber(): int {
         return $this->lastErrorNumber;
+    }
+
+    /**
+     * Checks if the last error was a failure to establish the connection: refused, unknown host,
+     * bad credentials, unknown database, too many connections.
+     * 2006 and 2013 (connection lost while running) are NOT included, they are retried by this class.
+     * @pure
+     * @return bool True if the last error was a connect error
+     */
+    public function is_last_error_connect(): bool {
+        return in_array($this->lastErrorNumber, [
+          SqlExecutor::ERROR_TOO_MANY_CONNECTIONS,
+          SqlExecutor::ERROR_DB_ACCESS_DENIED,
+          SqlExecutor::ERROR_ACCESS_DENIED,
+          SqlExecutor::ERROR_UNKNOWN_DATABASE,
+          SqlExecutor::ERROR_HOST_NOT_ALLOWED,
+          SqlExecutor::ERROR_CONNECT_FAILED,
+          SqlExecutor::ERROR_CONN_HOST_ERROR,
+          SqlExecutor::ERROR_UNKNOWN_HOST
+        ], true);
     }
 
     /**
