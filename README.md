@@ -215,7 +215,7 @@ $queryLog = $sql->getLog();        // All executed queries
 $errorLog = $sql->getErrorLog();   // All errors with retry attempts
 
 // Specific error type checking
-if ($sql->is_last_error_foreign_key_violation()) {
+if ($sql->is_last_error_invalid_foreign_key()) {
     echo "Referenced record doesn't exist";
 } elseif ($sql->is_last_error_child_records_exist()) {
     echo "Cannot delete: child records exist";
@@ -268,9 +268,47 @@ The library provides specific error detection methods:
 
 - `is_last_error_table_not_found()` - Missing tables
 - `is_last_error_duplicate_key()` - Unique constraint violations
-- `is_last_error_foreign_key_violation()` - Invalid foreign key references
+- `is_last_error_invalid_foreign_key()` - Invalid foreign key references
 - `is_last_error_child_records_exist()` - Cannot delete parent with children
 - `is_last_error_column_not_found()` - Invalid column names
+
+### Recommended catch shape
+
+Assumes PHP 8.3+ with `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT` (the PHP default).
+Every database, connect and option failure is a `mysqli_sql_exception`.
+
+```php
+try {
+    $sql->query($query, $params);
+} catch (mysqli_sql_exception $e) {
+    // Check right away: the next call resets getLastErrorNumber(). $e->getCode() is the same code.
+    if ($sql->is_last_error_duplicate_key()) {
+        // business: already exists
+    } elseif ($sql->is_last_error_invalid_foreign_key()) {
+        // business: parent row missing
+    } elseif ($sql->is_last_error_child_records_exist()) {
+        // business: cannot delete, children exist
+    } else {
+        throw $e; // schema, syntax, connection, deadlock after retries...
+    }
+}
+// \Error, \TypeError and \ValueError are programming bugs: do not catch them,
+// let them reach the global handler.
+```
+
+Things the caller must know:
+
+- `firstValue()` returns a scalar, and `$default` when no row matches. To tell "no row" from an empty
+  or NULL value, pass a `$default` that the column can never hold. If the column is nullable and
+  allows every value, use `row()` and test for `[]` instead.
+- `firstValue`, `row`, `array`, `arrayKeyed`, `multiKey*`, `keyValue` and `vector` need a statement that
+  returns a result set (SELECT). Calling them with INSERT/UPDATE/DELETE/DDL throws `\Error`; use `query()`.
+- `query()` returns `true` for DML. An UPDATE matching 0 rows is not an error: check `affected_rows()`.
+- `last_insert_id()` is `0` when nothing was inserted. With `ON DUPLICATE KEY UPDATE` it only returns
+  the key if you use `id = LAST_INSERT_ID(id)`.
+- Code 2006/2013 thrown by `transaction()` while `COMMIT` ran means the outcome is unknown:
+  check the database before running it again.
+- Parameters must be a list array (`[1, 'a']`), not named keys, or `\ValueError` is thrown.
 
 ## License
 

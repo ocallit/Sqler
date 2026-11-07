@@ -228,6 +228,11 @@ class SqlExecutor {
         throw new mysqli_sql_exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
     }
 
+    /**
+     * Same as query() but returns the raw result of runSql (mysqli_result is not fetched nor freed).
+     *
+     * @throws mysqli_sql_exception
+     */
     public function execute(string|mysqli_stmt $query, array $parameters = []): bool|array {
         return $this->runSql($query, $parameters);
     }
@@ -257,6 +262,8 @@ class SqlExecutor {
     /**
      * Retrieves the ID of the last inserted auto increment record.
      * use ON DUPLICATE KEY ... primary_key = LAST_INSERT_ID(primary_key);
+     * Reminder: with INSERT ... ON DUPLICATE KEY UPDATE, when the row is updated instead of inserted
+     * this only returns the key if the UPDATE clause uses LAST_INSERT_ID(id), otherwise it is 0 or stale.
      *
      * @return int The ID of the last inserted record.
      */
@@ -269,9 +276,11 @@ class SqlExecutor {
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
-     * @param string|null|bool $default
-     * @return string|null|bool
+     * @param string|null|bool $default returned when no row matches; to tell "no row" from a column value
+     *   it must be a value the column can never hold; if nullable use row() and test for [] instead
+     * @return string|null|bool scalar value of the first column
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function firstValue(string|mysqli_stmt $query, array $parameters = [], string|null|bool $default = ""):string|null|bool {
         $this->lastErrorNumber = 0;
@@ -293,6 +302,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function row(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -315,6 +325,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function arrayKeyed(string|mysqli_stmt $query, string $key, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -337,6 +348,7 @@ class SqlExecutor {
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
      * @return array [$key1=>[col1=>value1],$key2=>[]]
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function array(string|mysqli_stmt $query, array $parameters = [], array $default =[], int $resultType = MYSQLI_ASSOC): array {
         $this->lastErrorNumber = 0;
@@ -359,6 +371,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKey(string|mysqli_stmt $query, array $keys, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -389,6 +402,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyN(string|mysqli_stmt $query, int $numFields, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -439,6 +453,7 @@ class SqlExecutor {
      * @param array $default
      * @return array Multi-dimensional array using all but last column as keys, last column as values
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyLast(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
        $this->lastErrorNumber = 0;
@@ -488,6 +503,7 @@ class SqlExecutor {
      * @param array $default
      * @return array Multi-dimensional array with last field values accumulated in arrays
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function multiKeyValue(string|mysqli_stmt $query, array $parameters = [], array $default = []): array {
         $this->lastErrorNumber = 0;
@@ -538,6 +554,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function keyValue(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         $this->lastErrorNumber = 0;
@@ -559,6 +576,7 @@ class SqlExecutor {
      * @param array $default
      * @return array
      * @throws mysqli_sql_exception
+     * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
     public function vector(string|mysqli_stmt $query, array $parameters = [], array $default =[]): array {
         $this->lastErrorNumber = 0;
@@ -597,6 +615,8 @@ class SqlExecutor {
      * @param bool $consistentSnapshot
      * @param bool $readOnly
      * @return void
+     * @throws \Random\RandomException if random_int() finds no entropy for the retry pause
+     * @throws \Throwable any non mysqli_sql_exception raised by a query is rethrown after ROLLBACK, getLastErrorNumber() is 0
      * @throws mysqli_sql_exception when it fails, getLastErrorNumber() holds the code.
      *   Code 2006 or 2013 with the transaction not retried means the connection was lost while COMMIT ran:
      *   the server may or may not have committed, a caller that cares must check before running it again.
