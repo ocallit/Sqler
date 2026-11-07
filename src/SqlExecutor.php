@@ -658,7 +658,7 @@ class SqlExecutor {
      * @param array $queries each item: a SQL string, a mysqli_stmt, or ['query' => string, 'parameters' => array]
      * @param string|int $comment
      * @param bool $consistentSnapshot
-     * @param bool $readOnly
+     * @param bool|null $readOnly false: READ WRITE (default), true: READ ONLY, null: no clause, the session default applies
      * @return void
      * @throws \Random\RandomException if random_int() finds no entropy for the retry pause
      * @throws \Throwable any non mysqli_sql_exception raised by a query is rethrown after ROLLBACK, getLastErrorNumber() is 0
@@ -666,7 +666,7 @@ class SqlExecutor {
      *   Code 2006 or 2013 with the transaction not retried means the connection was lost while COMMIT ran:
      *   the server may or may not have committed, a caller that cares must check before running it again.
      */
-    public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false):void {
+    public function transaction(array $queries, string|int $comment = '', bool $consistentSnapshot = false, ?bool $readOnly = false):void {
         $this->lastErrorNumber = 0;
         $this->commitOutcomeUnknown = false;
         $attempts = 0;
@@ -726,19 +726,19 @@ class SqlExecutor {
      *
      * @param string|int $comment
      * @param bool $consistentSnapshot
-     * @param bool $readOnly
+     * @param bool|null $readOnly false: READ WRITE (default), true: READ ONLY, null: no clause, the session default applies
      * @return void
      * @throws mysqli_sql_exception
      */
-    public function begin(string|int $comment = '', bool $consistentSnapshot = false, bool $readOnly = false): void {
+    public function begin(string|int $comment = '', bool $consistentSnapshot = false, ?bool $readOnly = false): void {
         $result = true;
         $this->commitOutcomeUnknown = false;
         try {
             $modes = [];
             if ($consistentSnapshot)
                 $modes[] = "WITH CONSISTENT SNAPSHOT";
-            if ($readOnly)
-                $modes[] =  "READ ONLY";
+            if ($readOnly !== null)
+                $modes[] = $readOnly ? "READ ONLY" : "READ WRITE";
             $comment = SqlUtils::commentIt($comment);
             $result = $this->runSql("START TRANSACTION /*$comment*/ " . implode(", ", $modes));
             $this->insideTransaction = true;
