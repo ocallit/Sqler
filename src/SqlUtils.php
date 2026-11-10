@@ -16,6 +16,50 @@ class SqlUtils {
     protected function __construct() {}
 
     /**
+     * What a server is and its version, from the string it reports (SELECT VERSION(), mysqli::$server_info).
+     * MariaDB: "10.11.14-MariaDB-0ubuntu0.24.04.1", behind a proxy or replication "5.5.5-10.6.12-MariaDB" (the 5.5.5- is dropped).
+     * MySQL and the servers that speak like it: "8.0.36", "5.7.44-log", "8.0.mysql_aurora.3.04.0" (missing numbers are 0).
+     *
+     * @pure
+     * @param string $raw
+     * @return array{type: string, version: string, major: int, minor: int, patch: int, raw: string}
+     *   type is 'mariadb' or 'mysql', version is "major.minor.patch" for version_compare()
+     */
+    public static function parseServerVersion(string $raw): array {
+        $raw = trim($raw);
+        $isMariaDb = stripos($raw, 'mariadb') !== false;
+        $numbers = $isMariaDb ? preg_replace('/^5\.5\.5-/', '', $raw) : $raw;
+        preg_match('/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/', $numbers, $match);
+        $major = (int)($match[1] ?? 0);
+        $minor = (int)($match[2] ?? 0);
+        $patch = (int)($match[3] ?? 0);
+        return [
+          'type' => $isMariaDb ? 'mariadb' : 'mysql',
+          'version' => "$major.$minor.$patch",
+          'major' => $major,
+          'minor' => $minor,
+          'patch' => $patch,
+          'raw' => $raw,
+        ];
+    }
+
+    /**
+     * The utf8mb4 collations to try, best first, for text that compares accent insensitive and case insensitive (ai_ci), by server type and version:
+     * MySQL 8.0.1+ has utf8mb4_0900_ai_ci; older MySQL and every MariaDB use utf8mb4_unicode_ci, which every one of these servers has.
+     * (MariaDB 10.10+ documents utf8mb4_uca1400_ai_ci, but not every build has it, so it is not used.)
+     *
+     * @pure
+     * @param array{type: string, major: int, minor: int, patch: int} $serverInfo the result of parseServerVersion()
+     * @return string[]
+     */
+    public static function collationAiCiCandidates(array $serverInfo): array {
+        $version = $serverInfo['major'] * 10000 + $serverInfo['minor'] * 100 + $serverInfo['patch'];
+        if($serverInfo['type'] === 'mariadb')
+            return ['utf8mb4_unicode_ci'];
+        return $version >= 80001 ? ['utf8mb4_0900_ai_ci', 'utf8mb4_unicode_ci'] : ['utf8mb4_unicode_ci'];
+    }
+
+    /**
      * Changes a column name to a nice label or title
      *
      * @phpstan-pure

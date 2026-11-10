@@ -413,4 +413,50 @@ class SqlUtilsTest extends TestCase {
           json_decode($json, TRUE, 512, SqlUtils::JSON_MYSQL_OPTIONS)
         );
     }
+
+    #[DataProvider('parseServerVersionProvider')]
+    public function testParseServerVersion(string $raw, string $type, string $version, int $major, int $minor, int $patch): void {
+        $info = SqlUtils::parseServerVersion($raw);
+        $this->assertSame($type, $info['type']);
+        $this->assertSame($version, $info['version']);
+        $this->assertSame([$major, $minor, $patch], [$info['major'], $info['minor'], $info['patch']]);
+        $this->assertSame(trim($raw), $info['raw']);
+    }
+
+    public static function parseServerVersionProvider(): array {
+        return [
+          'mysql 8' => ['8.0.36', 'mysql', '8.0.36', 8, 0, 36],
+          'mysql 8 with distribution' => ['8.0.36-0ubuntu0.22.04.1', 'mysql', '8.0.36', 8, 0, 36],
+          'mysql 8.4' => ['8.4.0', 'mysql', '8.4.0', 8, 4, 0],
+          'mysql 5.7 log' => ['5.7.44-log', 'mysql', '5.7.44', 5, 7, 44],
+          'mariadb' => ['10.11.14-MariaDB-0ubuntu0.24.04.1', 'mariadb', '10.11.14', 10, 11, 14],
+          'mariadb 11' => ['11.4.2-MariaDB', 'mariadb', '11.4.2', 11, 4, 2],
+          'mariadb behind a proxy or replication' => ['5.5.5-10.6.12-MariaDB', 'mariadb', '10.6.12', 10, 6, 12],
+          'aurora missing patch number' => ['8.0.mysql_aurora.3.04.0', 'mysql', '8.0.0', 8, 0, 0],
+          'tidb speaks mysql' => ['5.7.25-TiDB-v7.1.0', 'mysql', '5.7.25', 5, 7, 25],
+          'spaces' => ['  8.4.0  ', 'mysql', '8.4.0', 8, 4, 0],
+          'empty' => ['', 'mysql', '0.0.0', 0, 0, 0],
+        ];
+    }
+
+    /** @param string[] $expected */
+    #[DataProvider('collationAiCiCandidatesProvider')]
+    public function testCollationAiCiCandidates(string $raw, array $expected): void {
+        $this->assertSame($expected, SqlUtils::collationAiCiCandidates(SqlUtils::parseServerVersion($raw)));
+    }
+
+    public static function collationAiCiCandidatesProvider(): array {
+        $unicode = ['utf8mb4_unicode_ci'];
+        return [
+          'mysql 8.4' => ['8.4.0', ['utf8mb4_0900_ai_ci', 'utf8mb4_unicode_ci']],
+          'mysql 8.0.1 the first with 0900' => ['8.0.1', ['utf8mb4_0900_ai_ci', 'utf8mb4_unicode_ci']],
+          'mysql 8.0.0' => ['8.0.0', $unicode],
+          'mysql 5.7' => ['5.7.44-log', $unicode],
+          'mariadb 10.6' => ['10.6.12-MariaDB', $unicode],
+          'mariadb 10.9' => ['10.9.8-MariaDB', $unicode],
+          'mariadb 10.11' => ['10.11.14-MariaDB-0ubuntu0.24.04.1', $unicode],
+          'mariadb 11.4' => ['11.4.2-MariaDB', $unicode],
+          'mariadb behind a proxy' => ['5.5.5-10.6.12-MariaDB', $unicode],
+        ];
+    }
 }
