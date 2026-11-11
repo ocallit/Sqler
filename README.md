@@ -89,6 +89,7 @@ $sql->query("CREATE TABLE t (...) DEFAULT CHARSET=utf8mb4 COLLATE=" . $sql->coll
 ```
 The server is asked once per connection. `collationAiCi()` only returns a collation the server really has (it checks `information_schema.COLLATIONS`).
 
+
 **Error Handling with Smart Recovery:**
 ```php
 try {
