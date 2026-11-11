@@ -79,6 +79,16 @@ $statusList = $sql->vector("SELECT DISTINCT status FROM orders");    // Single c
 $statusCounts = $sql->keyValue("SELECT status, COUNT(*) FROM orders GROUP BY status"); // Key-value pairs
 ```
 
+**Which server is it (MySQL or MariaDB) and which collation to use:**
+```php
+$sql->serverType();     // 'mysql' or 'mariadb'
+$sql->serverVersion();  // '8.0.36', '10.11.14' (version_compare() friendly)
+$sql->serverInfo();     // ['type' => 'mariadb', 'version' => '10.11.14', 'major' => 10, 'minor' => 11, 'patch' => 14, 'raw' => '10.11.14-MariaDB-0ubuntu0.24.04.1']
+$sql->collationAiCi();  // utf8mb4 collation that ignores accents and case: utf8mb4_0900_ai_ci on MySQL 8.0.1+, utf8mb4_unicode_ci on older MySQL and on MariaDB
+$sql->query("CREATE TABLE t (...) DEFAULT CHARSET=utf8mb4 COLLATE=" . $sql->collationAiCi());
+```
+The server is asked once per connection. `collationAiCi()` only returns a collation the server really has (it checks `information_schema.COLLATIONS`).
+
 **Error Handling with Smart Recovery:**
 ```php
 try {

@@ -10,8 +10,11 @@ use mysqli_sql_exception;
 use mysqli_stmt;
 use SensitiveParameter;
 use Throwable;
+use function array_column;
+use function array_fill;
 use function array_key_exists;
 use function array_merge;
+use function count;
 use function implode;
 use function in_array;
 use function is_array;
@@ -38,6 +41,10 @@ class SqlExecutor {
     protected mysqli|null $mysqli = null;
     protected string $charset = 'utf8mb4';
     protected string $collation = 'utf8mb4_0900_ai_ci';
+
+    /** @var array{type: string, version: string, major: int, minor: int, patch: int, raw: string}|null cache of serverInfo(), per connection */
+    protected ?array $serverInfo = null;
+    protected ?string $collationAiCi = null;
 
     /**
      * @var array{
@@ -228,6 +235,8 @@ class SqlExecutor {
      *   0 when setting an option failed
      */
     protected function connect():void {
+        $this->serverInfo = null;
+        $this->collationAiCi = null;
         $this->mysqli = new mysqli();
         foreach($this->connectOptions as $option => $value)
             if(!$this->mysqli->options($option, $value)) {
@@ -833,6 +842,49 @@ class SqlExecutor {
           SqlExecutor::ERROR_CONN_HOST_ERROR,
           SqlExecutor::ERROR_UNKNOWN_HOST
         ], true);
+    }
+
+    /**
+     * What the server is and its version, asked once per connection (SELECT VERSION()).
+     *
+     * @return array{type: string, version: string, major: int, minor: int, patch: int, raw: string}
+     *   type is 'mysql' or 'mariadb', version is "major.minor.patch" (8.0.36, 10.11.14), raw is what the server said
+     * @throws mysqli_sql_exception
+     */
+    public function serverInfo(): array {
+        return $this->serverInfo ??= SqlUtils::parseServerVersion((string)($this->row('SELECT VERSION() AS version')['version'] ?? ''));
+    }
+
+    /** @return string 'mysql' or 'mariadb' */
+    public function serverType(): string {
+        return $this->serverInfo()['type'];
+    }
+
+    /** @return string "major.minor.patch" of the server, e.g. 8.0.36 or 10.11.14 */
+    public function serverVersion(): string {
+        return $this->serverInfo()['version'];
+    }
+
+    /**
+     * The utf8mb4 collation for text that compares accent insensitive and case insensitive on this server: the best of
+     * SqlUtils::collationAiCiCandidates() that the server really has (information_schema.COLLATIONS). Asked once per connection.
+     * Use it to create tables: "DEFAULT CHARSET=utf8mb4 COLLATE=" . $sql->collationAiCi()
+     *
+     * @return string utf8mb4_0900_ai_ci or utf8mb4_unicode_ci
+     * @throws mysqli_sql_exception
+     */
+    public function collationAiCi(): string {
+        if($this->collationAiCi !== null)
+            return $this->collationAiCi;
+        $candidates = SqlUtils::collationAiCiCandidates($this->serverInfo());
+        $placeholders = implode(',', array_fill(0, count($candidates), '?'));
+        $has = array_column($this->array(
+          "SELECT COLLATION_NAME FROM information_schema.COLLATIONS WHERE CHARACTER_SET_NAME = 'utf8mb4' AND COLLATION_NAME IN ($placeholders)",
+          $candidates), 'COLLATION_NAME');
+        foreach($candidates as $candidate)
+            if(in_array($candidate, $has, true))
+                return $this->collationAiCi = $candidate;
+        return $this->collationAiCi = 'utf8mb4_unicode_ci';
     }
 
     /**
