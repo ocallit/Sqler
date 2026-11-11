@@ -285,8 +285,9 @@ The library provides specific error detection methods:
 
 ### Recommended catch shape
 
-Assumes PHP 8.3+ with `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT` (the PHP default).
 Every database, connect and option failure is a `mysqli_sql_exception`.
+Assumes PHP 8.3+ with `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT` (the PHP default).
+
 
 ```php
 try {
