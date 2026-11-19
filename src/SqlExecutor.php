@@ -315,13 +315,13 @@ class SqlExecutor {
     public function affected_rows():int {return $this->mysqli?->affected_rows ?? 0;}
 
     /**
-     * return value of the first column in the first row $default on not found
+     * return value of the first column in the first row as string or null, $default on not found
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param string|null|bool $default returned when no row matches; to tell "no row" from a column value
      *   it must be a value the column can never hold; if nullable use row() and test for [] instead
-     * @return string|null|bool scalar value of the first column
+     * @return string|null|bool value of the first column in the first row as string or null, $default on not found
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
@@ -337,13 +337,13 @@ class SqlExecutor {
     }
 
     /**
-     * return [col1=>value1, ...] $default on not found
+     * return columns (tuple) of the first row only [col1=>value1, ...] $default on not found
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
-     * @return array [$key1=>[col1=>value1],$key2=>[]]
+     * @return array [col1=>value1, ...] columns (tuple) of the first row only $default on not found
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
@@ -362,7 +362,7 @@ class SqlExecutor {
      * return [$key1=>[col1=>value1],$key2=>[]], $default on not found
      *
      * @param string|mysqli_stmt $query
-     * @param string $key
+     * @param string $key the column's value to use as key
      * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
@@ -389,7 +389,7 @@ class SqlExecutor {
      * @param array $parameters
      * @param array $default
      * @param int $resultType MYSQLI_ASSOC|MYSQLI_NUM|MYSQLI_BOTH
-     * @return array [$key1=>[col1=>value1],$key2=>[]]
+     * @return array [[colName1=>value1, colName2=>value2, ...],[]], $default on not found
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
@@ -412,7 +412,7 @@ class SqlExecutor {
      * @param array $keys
      * @param array $parameters
      * @param array $default
-     * @return array
+     * @return array Multidimensional array keyed by specified columns in $keys, the rest of the column sin a key:value array
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
@@ -590,12 +590,12 @@ class SqlExecutor {
     }
 
     /**
-     * return [[row1.col1 => row1.col2], [row2.col1 => row2.col2], ...] a key => value array, $default on not found
+     * return [row1.col1 => row1.col2, row2.col1 => row2.col2, ...] a key => value array, $default on not found
      *
      * @param string|mysqli_stmt $query
      * @param array $parameters
      * @param array $default
-     * @return array
+     * @return array [row1.col1 => row1.col2, row2.col1 => row2.col2, ...] a key => value array, $default on not found
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
@@ -612,12 +612,12 @@ class SqlExecutor {
     }
 
     /**
-     * return [row1.col1, row2.col1, ...], $default on not found
+     * return the first column of every row [row1.col1, row2.col1, ], $default on not found
      *
      * @param string|mysqli_stmt  $query
      * @param array $parameters
      * @param array $default
-     * @return array
+     * @return array [row1.col1, row2.col1, ] the first column of every row , $default on not found
      * @throws mysqli_sql_exception
      * @throws \Error when $query does not return a result set (INSERT/UPDATE/DELETE/DDL), use query()
      */
