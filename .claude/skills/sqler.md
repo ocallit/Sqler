@@ -242,7 +242,7 @@ $fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
 
 **Values stay strings:** register the row exactly as SQL returned it (numbers, dates, datetimes and times are
 strings) and Historian never converts anything: `register()` stores values as given and reading keeps them as
-stored. Comparison is LOOSE (`!=`): `'1.10'` = `'1.1'`, `1` = `'1'`; but null versus `0`, `''` or `false` IS a change. Don't cast values to int/float before registering.
+stored. Comparison is LOOSE (`!=`): `'1.10'` = `'1.1'`, `1` = `'1'`; but null versus `0`, `''` or `false` IS a change, and so is bool versus non-bool (`0` vs `false`, `''` vs `false`). Don't cast values to int/float before registering.
 
 **Change record structure:**
 ```php

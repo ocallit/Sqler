@@ -317,7 +317,7 @@ class Historian {
         return implode("\t" ,$pkValues);
     }
 
-    /** Loose comparison (!=) on purpose: '1.10' == '1.1', 1 == '1' are not differences. But null versus any value (0, '', false) is. */
+    /** Loose comparison (!=) on purpose: '1.10' == '1.1', 1 == '1' are not differences. But null or bool versus any other type (0, '', false, true) is. */
     protected function differ(array $before, array $after, ?array $ignoreFields = null):array {
         $ignoreFields ??= $this->ignoreDifferenceForFields;
         $diff = [];
@@ -333,7 +333,7 @@ class Historian {
                 if(!empty($nested))
                     $diff[$key] = $nested;
             }
-            elseif(($beforeValue === null) !== ($afterValue === null) || $beforeValue != $afterValue)
+            elseif(($beforeValue === null) !== ($afterValue === null) || is_bool($beforeValue) !== is_bool($afterValue) || $beforeValue != $afterValue)
                 $diff[$key] = ['before' => $beforeValue, 'after' => $afterValue];
         }
         return $diff;

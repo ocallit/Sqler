@@ -366,7 +366,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 #### `getFieldChanges(array $changedRecords, array $onlyFields = []): array`
 **Input**: the result of `getChangedRecords()`. Pass the same `$onlyFields` to both methods, otherwise other fields are reported too.
 **Returns**: `fieldName => ['added' => [history_id...], 'modified' => [...], 'deleted' => [...]]`, ids in the order of the given records (date sorted)
-**Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change. Comparison is LOOSE (`!=`, not strict): `'1.10'` = `'1.1'`, `'007'` = `'7'`, `1` = `'1'`, but null versus any value (`0`, `''`, `'0'`, `false`) IS a change (`0` → null is `deleted`, null → `''` is `added`). Decimals beyond float precision compare equal; two huge integer strings are still compared as text. A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
+**Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change. Comparison is LOOSE (`!=`, not strict): `'1.10'` = `'1.1'`, `'007'` = `'7'`, `1` = `'1'`, but null versus any value (`0`, `''`, `'0'`, `false`) IS a change, and so is a bool versus any non-bool (`0` vs `false`, `''` vs `false`, `1` vs `true`) (`0` → null is `deleted`, null → `''` is `added`). Decimals beyond float precision compare equal; two huge integer strings are still compared as text. A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
 
 ```php
 $records = $historian->getChangedRecords(['id' => 42]);                 // all versions that changed
