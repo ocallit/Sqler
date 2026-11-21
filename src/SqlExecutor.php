@@ -180,7 +180,7 @@ class SqlExecutor {
 
     public string $lastPreparedQuery = "";
 
-    /** @noinspection PhpGetterAndSetterCanBeReplacedWithPropertyHooksInspection */
+
     protected array $log = [];
     protected array $logError = [];
     // Error reported by the latest operation, independent of mysqli cleanup state.

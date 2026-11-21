@@ -195,6 +195,8 @@ class SqlUtils {
     public static function  namedToPositional(string $query, array $params): array {
         $values = [];
 
+        /** @noinspection RegExpRedundantEscape */
+        /** @noinspection RegExpDuplicateCharacterInClass */
         $pattern = <<<'REGEX'
 ~('(?:\\.|''|[^'\\])*'|"(?:\\.|""|[^"\\])*"|`(?:``|[^`])*`|--[ \t][^\r\n]*|\#[^\r\n]*|/\*[\s\S]*?\*/)|:\{([^{}]+)\}|:([A-Za-z0-9_#]+)~
 REGEX;

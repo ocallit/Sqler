@@ -485,7 +485,7 @@ class ErrorLog {
         $host = self::server('HTTP_HOST');
         if($host === '')
             return self::server('REQUEST_URI');
-        /** @noinspection HttpUrlsUsage */
+
         $https = strtolower(self::server('HTTPS'));
         return (($https === '' || $https === 'off') ? 'http://' : 'https://') . $host . self::server('REQUEST_URI');
     }
@@ -493,7 +493,7 @@ class ErrorLog {
     /**
      * Create the error log table if it doesn't exist
      *
-     * @return void
+     * @return voi
      */
     protected static function tableCreate(): void {
 
