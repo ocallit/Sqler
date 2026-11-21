@@ -72,6 +72,90 @@ class SqlUtils {
     }
 
     /**
+     * Redondea (mitad hacia arriba, lejos de cero) y pone comas a un numero sin usar floats ni bcmath, no numericos los regresa
+     * Notacion cientifica (E o e): si el valor absoluto es menor a diez millones se expande y se redondea como cualquier numero (1234.5E3 -> 1,234,500.00);
+     * si no, no se expande ni se redondea: a la mantisa se le ponen comas y el exponente se deja como esta (-3.141592E9 -> -3.141592E9)
+     *
+     * @param string|int|float|null|bool $num string numerico exacto, un float se usa como lo imprime PHP (digitos mas cortos que lo identifican)
+     * @param string|int $decimals decimales, si es menor que 0 usa 0
+     * @return string el $num con comas y redondeado al $decimals decimales, null: '', no numerico: el mismo $num
+     */
+    public static function bcformat(string|int|float|null|bool $num, string|int $decimals=2, string $separator=',', string $decimalPoint='.'):string {
+        if($num === null)
+            return '';
+        $num = trim((string)$num);
+        if($num === '' || !is_numeric($num))
+            return $num;
+
+        $sign = $num[0];
+        if($sign === '-' || $sign === '+')
+            $num = substr($num, 1);
+        $exponent = '';
+        if(($e = stripos($num, 'e')) !== false) {
+            $exponent = substr($num, $e);
+            $num = substr($num, 0, $e);
+        }
+        [$int, $frac] = explode('.', $num, 2) + [1 => ''];
+
+        $decimals = max(0, (int)$decimals);
+        if($exponent !== '') {
+            $exp = max(-100000, min(100000, (int)substr($exponent, 1)));
+            $digits = $int . $frac;
+            $lead = strspn($digits, '0'); // leading zeros of the digits
+            $point = strlen($int) + $exp; // where the decimal point is in $digits
+            if($lead === strlen($digits)) { // zero
+                $int = '0';
+                $frac = $exponent = '';
+            } elseif($point - $lead > 7) // ten million or more: not expanded, not rounded
+                $decimals = strlen($frac);
+            else {
+                $exponent = '';
+                if($point - $lead < -$decimals) // rounds to zero
+                    $int = $frac = '';
+                else {
+                    if($point <= 0) {
+                        $digits = str_repeat('0', -$point) . $digits;
+                        $point = 0;
+                    } elseif($point > strlen($digits))
+                        $digits .= str_repeat('0', $point - strlen($digits));
+                    $int = substr($digits, 0, $point);
+                    $frac = substr($digits, $point);
+                }
+            }
+        }
+        if(strlen($frac) > $decimals) {
+            $roundUp = $frac[$decimals] >= '5';
+            $all = $int . substr($frac, 0, $decimals);
+            if($roundUp) {
+                $i = strlen($all) - 1;
+                while($i >= 0 && $all[$i] === '9')
+                    $all[$i--] = '0';
+                if($i < 0)
+                    $all = '1' . $all;
+                else
+                    $all[$i] = chr(ord($all[$i]) + 1);
+            }
+            $int = substr($all, 0, strlen($all) - $decimals);
+            $frac = $decimals > 0 ? substr($all, -$decimals) : '';
+        } else
+            $frac = str_pad($frac, $decimals, '0');
+
+        $int = ltrim($int, '0');
+        $isZero = $int === '' && trim($frac, '0') === '';
+        if($int === '')
+            $int = '0';
+        $length = strlen($int);
+        if($length > 3) {
+            $head = $length % 3;
+            $groups = str_split(substr($int, $head), 3);
+            if($head > 0)
+                array_unshift($groups, substr($int, 0, $head));
+            $int = implode($separator, $groups);
+        }
+        return ($sign === '-' && !$isZero ? '-' : '') . $int . ($decimals > 0 ? $decimalPoint . $frac : '') . $exponent;
+    }
+
+    /**
      * Protect with ` backticks for column name to column name respecting . table.column to `table`.`column`
      *
      * @phpstan-pure

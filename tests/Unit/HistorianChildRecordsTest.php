@@ -292,7 +292,7 @@ class HistorianChildRecordsTest extends TestCase {
 
         $html = $this->historian->changesAsHTML($changes, self::ITEMS_FORMAT);
 
-        self::assertStringContainsString('<td>Total<td>10<td>20', $html);
+        self::assertStringContainsString('<td>Total<td>10.00<td>20.00', $html);
         self::assertStringNotContainsString('<tr class="lines">', $html);
         self::assertStringNotContainsString('circles', $html);
     }
@@ -456,7 +456,7 @@ class HistorianChildRecordsTest extends TestCase {
           'valuePrefix' => '$', 'valueSuffix' => ' USD',
         ]]);
 
-        self::assertStringContainsString('<tr class="money big"><td>[Invoice <i>total</i>]<td>$10 USD<td>$20 USD', $html);
+        self::assertStringContainsString('<tr class="money big"><td>[Invoice <i>total</i>]<td>$10.00 USD<td>$20.00 USD', $html);
     }
 
     public function testFieldFormatLabelDefaultsToToLabel(): void {
@@ -464,7 +464,7 @@ class HistorianChildRecordsTest extends TestCase {
 
         $html = $this->historian->changesAsHTML($changes, ['grand_total' => ['class' => 'c']]);
 
-        self::assertStringContainsString('<tr class="c"><td>Grand Total<td>10<td>20', $html);
+        self::assertStringContainsString('<tr class="c"><td>Grand Total<td>10.00<td>20.00', $html);
     }
 
     public function testFieldFormatKeysAreOptional(): void {
@@ -472,7 +472,7 @@ class HistorianChildRecordsTest extends TestCase {
 
         $html = $this->historian->changesAsHTML($changes, ['total' => []]);
 
-        self::assertStringContainsString('<tr><td>Total<td>10<td>20', $html);
+        self::assertStringContainsString('<tr><td>Total<td>10.00<td>20.00', $html);
     }
 
     public function testFieldFormatDoesNotEscapeAnything(): void {
@@ -506,7 +506,7 @@ class HistorianChildRecordsTest extends TestCase {
           'diff' => ['total' => ['before' => '1', 'after' => '2']],
         ]], ['total' => ['class' => 'k']]);
 
-        self::assertStringContainsString('<tr class="k"><td>Total<td>1<td>2', $html);
+        self::assertStringContainsString('<tr class="k"><td>Total<td>1.00<td>2.00', $html);
     }
 
     // ------------------------------------------------------------------ changesAsHTML: child lines
@@ -537,8 +537,8 @@ class HistorianChildRecordsTest extends TestCase {
 
         self::assertStringContainsString(
           '<tr class="lines"><td>Lines'
-          . '<td><span title="Quantity">12</span> <span title="Product">circles</span> <span title="Price">3.14</span>'
-          . '<td><span title="Quantity">12</span> <span title="Product">circles</span> <span title="Price">3.50</span>',
+          . '<td><span title="Quantity">12.00</span> <span title="Product">circles</span> <span title="Price">3.14</span>'
+          . '<td><span title="Quantity">12.00</span> <span title="Product">circles</span> <span title="Price">3.50</span>',
           $html
         );
     }
@@ -555,8 +555,8 @@ class HistorianChildRecordsTest extends TestCase {
         $html = $this->htmlOfChange(self::invoiceHistory(), 4, $format);
 
         self::assertStringContainsString(
-          '<td><span title="Price">3.14</span> <span title="Product">circles</span> <span title="Quantity">12</span>'
-          . '<td><span title="Price">3.50</span> <span title="Product">circles</span> <span title="Quantity">12</span>',
+          '<td><span title="Price">3.14</span> <span title="Product">circles</span> <span title="Quantity">12.00</span>'
+          . '<td><span title="Price">3.50</span> <span title="Product">circles</span> <span title="Quantity">12.00</span>',
           $html
         );
     }
@@ -569,8 +569,8 @@ class HistorianChildRecordsTest extends TestCase {
         ], 2, self::ITEMS_FORMAT);
 
         self::assertStringContainsString(
-          '<td><span title="Quantity">1</span> <span title="Product">circles</span> <span title="Price">3.14</span>'
-          . '<td><span title="Quantity">5</span> <span title="Product">circles</span> <span title="Price">3.14</span>',
+          '<td><span title="Quantity">1.00</span> <span title="Product">circles</span> <span title="Price">3.14</span>'
+          . '<td><span title="Quantity">5.00</span> <span title="Product">circles</span> <span title="Price">3.14</span>',
           $html
         );
     }
@@ -581,8 +581,8 @@ class HistorianChildRecordsTest extends TestCase {
           2 => ['items' => [101 => self::line('1', 'circles', '3.14', '5')]],
         ], 2, self::ITEMS_FORMAT);
 
-        self::assertStringContainsString('<span title="Price">3.14</span> <span>Discount: 0</span><td>', $html);
-        self::assertStringContainsString('<span title="Price">3.14</span> <span>Discount: 5</span>', $html);
+        self::assertStringContainsString('<span title="Price">3.14</span> <span>Discount: 0.00</span><td>', $html);
+        self::assertStringContainsString('<span title="Price">3.14</span> <span>Discount: 5.00</span>', $html);
     }
 
     public function testIgnoredFieldsOfTheLinesAreNotShown(): void {
@@ -608,7 +608,7 @@ class HistorianChildRecordsTest extends TestCase {
 
         self::assertStringContainsString(
           '<tr class="lines"><td>Lines<td>'
-          . '<td><span title="Quantity">1</span> <span title="Product">squares</span> <span title="Price">9.00</span>',
+          . '<td><span title="Quantity">1.00</span> <span title="Product">squares</span> <span title="Price">9.00</span>',
           $html
         );
         self::assertSame(1, substr_count($html, '<tr class="lines">'));
@@ -619,7 +619,7 @@ class HistorianChildRecordsTest extends TestCase {
 
         self::assertStringContainsString(
           '<tr class="lines"><td>Lines'
-          . '<td><span title="Quantity">2</span> <span title="Product">triangles</span> <span title="Price">1.00</span>'
+          . '<td><span title="Quantity">2.00</span> <span title="Product">triangles</span> <span title="Price">1.00</span>'
           . '<td></tbody>',
           $html
         );
@@ -631,7 +631,7 @@ class HistorianChildRecordsTest extends TestCase {
           2 => ['total' => '1', 'items' => [101 => self::line('1', 'circles', '3.14', '5')]],
         ], 2, self::ITEMS_FORMAT);
 
-        self::assertStringContainsString('<span>Discount: 5</span>', $html);
+        self::assertStringContainsString('<span>Discount: 5.00</span>', $html);
     }
 
     public function testAddedLineDoesNotShowOtherFieldsThatAreNull(): void {
@@ -648,9 +648,9 @@ class HistorianChildRecordsTest extends TestCase {
 
         // 101 price modified, 103 product modified, 104 added
         self::assertSame(3, substr_count($html, '<tr class="lines">'));
-        self::assertStringContainsString('<span title="Price">3.50</span><td><span title="Quantity">12</span> <span title="Product">circles</span> <span title="Price">4.00</span>', $html);
-        self::assertStringContainsString('<span title="Product">squares</span> <span title="Price">9.00</span><td><span title="Quantity">1</span> <span title="Product">cubes</span>', $html);
-        self::assertStringContainsString('<td><td><span title="Quantity">5</span> <span title="Product">dots</span>', $html);
+        self::assertStringContainsString('<span title="Price">3.50</span><td><span title="Quantity">12.00</span> <span title="Product">circles</span> <span title="Price">4.00</span>', $html);
+        self::assertStringContainsString('<span title="Product">squares</span> <span title="Price">9.00</span><td><span title="Quantity">1.00</span> <span title="Product">cubes</span>', $html);
+        self::assertStringContainsString('<td><td><span title="Quantity">5.00</span> <span title="Product">dots</span>', $html);
     }
 
     public function testWholeCollectionAppearingPrintsEveryLineAsAdded(): void {
@@ -683,8 +683,8 @@ class HistorianChildRecordsTest extends TestCase {
         $html = $this->htmlOfChange(self::invoiceHistory(), 4, $format);
 
         self::assertStringContainsString(
-          '<td><span class="num" title="Quantity">12 u.</span> (<span title="Item">circles</span>) <span class="money" title="Price">$3.14</span>'
-          . '<td><span class="num" title="Quantity">12 u.</span> (<span title="Item">circles</span>) <span class="money" title="Price">$3.50</span>',
+          '<td><span class="num" title="Quantity">12.00 u.</span> (<span title="Item">circles</span>) <span class="money" title="Price">$3.14</span>'
+          . '<td><span class="num" title="Quantity">12.00 u.</span> (<span title="Item">circles</span>) <span class="money" title="Price">$3.50</span>',
           $html
         );
     }
@@ -703,7 +703,7 @@ class HistorianChildRecordsTest extends TestCase {
           2 => ['items' => [101 => ['unit_price' => '2']]],
         ], 2, ['items' => ['child' => ['unit_price' => []]]]);
 
-        self::assertStringContainsString('<span title="Unit Price">1</span>', $html);
+        self::assertStringContainsString('<span title="Unit Price">1.00</span>', $html);
     }
 
     public function testChildValuesAreNotEscaped(): void {
@@ -722,7 +722,7 @@ class HistorianChildRecordsTest extends TestCase {
           2 => ['items' => [101 => ['quantity' => '2', 'note' => null]]],
         ], 2, ['items' => ['child' => ['quantity' => [], 'note' => []]]]);
 
-        self::assertStringContainsString('<span title="Quantity">1</span> <span title="Note"></span>', $html);
+        self::assertStringContainsString('<span title="Quantity">1.00</span> <span title="Note"></span>', $html);
     }
 
     public function testChildRecursion(): void {
@@ -736,7 +736,7 @@ class HistorianChildRecordsTest extends TestCase {
         ], 2, $format);
 
         self::assertStringContainsString(
-          '<span title="Options"><span title="Name">#red</span> <span title="Extra">1</span>; <span title="Name">#blue</span> <span title="Extra">2</span></span>',
+          '<span title="Options"><span title="Name">#red</span> <span title="Extra">1.00</span>; <span title="Name">#blue</span> <span title="Extra">2.00</span></span>',
           $html
         );
         self::assertStringContainsString('<span title="Name">#green</span>', $html);
@@ -747,7 +747,7 @@ class HistorianChildRecordsTest extends TestCase {
         $plain = $this->htmlOfChange(self::invoiceHistory(), 3, ['total' => ['class' => 't']]);
 
         self::assertStringNotContainsString('Total', $html, 'total did not change in 7');
-        self::assertStringContainsString('<tr class="t"><td>Total<td>10<td>20', $plain);
+        self::assertStringContainsString('<tr class="t"><td>Total<td>10.00<td>20.00', $plain);
     }
 
     public function testHeaderAndChildChangesInTheSameChange(): void {
@@ -756,7 +756,7 @@ class HistorianChildRecordsTest extends TestCase {
           2 => ['total' => '20', 'items' => [101 => self::line('1', 'a', '2.00')]],
         ], 2, self::ITEMS_FORMAT + ['total' => ['class' => 't']]);
 
-        self::assertStringContainsString('<tr class="t"><td>Total<td>10<td>20', $html);
+        self::assertStringContainsString('<tr class="t"><td>Total<td>10.00<td>20.00', $html);
         self::assertStringContainsString('<tr class="lines"><td>Lines', $html);
     }
 
