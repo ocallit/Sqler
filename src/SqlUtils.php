@@ -68,7 +68,9 @@ class SqlUtils {
      */
     public static function toLabel(string $fieldName): string {
         $snake = mb_strtolower(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $fieldName));
-        return ucwords(str_replace('_', ' ', $snake));
+        $words = str_replace('_', ' ', $snake);
+        // like ucwords, but a multibyte first letter (á) is capitalized too
+        return preg_replace_callback('/(?<!\S)\p{L}/u', static fn(array $m): string => mb_convert_case($m[0], MB_CASE_TITLE), $words) ?? ucwords($words);
     }
 
     /**
