@@ -551,7 +551,7 @@ class Historian {
             $decimals = (int)$format['decimals'];
         elseif($column !== null)
             $decimals = $this->scaleOfColumn($column);
-        $decimals = max(0, min(100, $decimals)); // a mistyped 'decimals' => 1000000000 must not exhaust the memory
+        $decimals = max(0, min(15, $decimals)); // a mistyped 'decimals' => 1000000000 must not exhaust the memory
         $commas = $pattern !== null && $this->isNumberFormat($pattern) ? str_contains($pattern, ',') : (bool)($format['commas'] ?? !$isIdentifier);
         return ['code' => 'number', 'reason' => 'number', 'data' => [
           'decimals' => $decimals,

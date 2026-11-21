@@ -153,9 +153,10 @@ class HistorianFormatTest extends TestCase {
         self::assertSame(['-01:30 PM', '-01:30 AM'], $this->cells('elapsed', '-13:30:00', '-01:30:00', ['format' => 'h:i A']));
     }
 
-    public function testHugeDecimalsAreCapped(): void {
+    public function testDecimalsAreCappedAt15(): void {
         [$before] = $this->cells('amount', '1', '2', ['decimals' => 1000000000]);
-        self::assertSame(100, strlen(explode('.', $before)[1]));
+        self::assertSame(15, strlen(explode('.', $before)[1]));
+        self::assertSame(15, strlen(explode('.', $this->cells('amount', '1', '2', ['format' => '0.' . str_repeat('0', 20)])[0])[1]));
     }
 
     public function testDaylightSavingDoesNotShiftTheTime(): void {
