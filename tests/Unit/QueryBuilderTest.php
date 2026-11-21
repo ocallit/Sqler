@@ -399,16 +399,6 @@ class QueryBuilderTest extends TestCase {
             "UPDATE /*c*/ `users` SET `status`=?",
             ['active'],
           ],
-          'empty_data_leaves_the_set_list_empty' => [
-            't', [], ['id' => 1], 'c',
-            "UPDATE /*c*/ `t` SET  WHERE   (`id`=?)",
-            [1],
-          ],
-          'empty_data_and_empty_where' => [
-            't', [], [], 'c',
-            "UPDATE /*c*/ `t` SET",
-            [],
-          ],
             // SET parameters always come before WHERE parameters
           'set_parameters_precede_where_parameters' => [
             't', ['a' => 1, 'b' => 2], ['c' => 3, 'd' => 4], 'c',

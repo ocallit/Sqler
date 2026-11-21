@@ -40,6 +40,9 @@ class SqlUtilsTest extends TestCase {
           'starts_with_digit' => ['2nd_line', '2nd Line'],
             // strtolower/ucwords are byte oriented: non ascii bytes pass through untouched
           'non_ascii_bytes_pass_through' => ['ÁREA_NOMBRE', 'Área Nombre'],
+          'multibyte_first_letter' => ['año_nuevo', 'Año Nuevo'],
+          'multibyte_camel_case' => ['áreaNombre', 'Área Nombre'],
+          'multibyte_not_at_word_start' => ['pañal', 'Pañal'],
           'spaces_already_present' => ['user name_last', 'User Name Last'],
         ];
     }

@@ -31,7 +31,10 @@ use function is_array;
  *   - getFieldChanges($changedRecords, $onlyFields=[]): fieldName => [added=>[ids], modified=>[ids], deleted=>[ids]]
  *   - changesAsHTML($changes, $fieldFormat=[]): string, $fieldFormat per field: class, label, fieldPrefix/Suffix, valuePrefix/Suffix, child
  *   - $onlyFields entries may be paths into child lines: 'items.price'
+ *   - changesAsHTML formats numbers, dates, datetimes and times, see $fieldFormat and setMetadata(). Keys of a field's entry:
+ *     'format' '#,##0.00' (number, it has # or is only 0 , .) or a php date() format ('d-M-y H:i'); 'decimals', 'commas', 'type' (number|date|datetime|time|text)
  *
+ * A delete row is always returned by getChanges() and getChangedRecords(), even when no field changed.
  * Values: SQL returns strings (numbers, dates, datetimes, times) and they must stay strings: register() stores values
  *   as given, nothing is converted when reading; JSON_BIGINT_AS_STRING is the only number flag json_decode offers.
  * Auto-ignored fields: ultimo_cambio, ultimo_cambio_por, last_changed, last_changed_by, last_change, last_change_by
@@ -59,6 +62,18 @@ class Historian {
       'last_change', 'last_change_by'
     ];
 
+    /** Formatting defaults of changesAsHTML */
+    public static int $DefaultDecimals = 2;
+    /** @var array<string, string> php date() format of a date, datetime and time that has no 'format' */
+    public static array $DateFormats = ['date' => 'd-M-y', 'datetime' => 'd-M-y H:i', 'time' => 'H:i'];
+    /** @var array<string, string> english word => translation of a formatted date: ['Jan' => 'Ene', 'Mon' => 'Lun'] */
+    public static array $Words = [];
+    /** @var string[] a field with one of these words in its name (snake or camel case) or that ends in id is an identifier: no thousands separators */
+    public static array $NoCommasNames = ['numero', 'number', 'num'];
+
+    protected ?DatabaseMetadata $metadata = null;
+    /** @var array<string, array>|null columns of $table, null: not read yet */
+    protected ?array $columns = null;
     protected string $jsonSqlType = 'JSON';
     protected string $table;
     protected string $tableHistory;
@@ -77,6 +92,12 @@ class Historian {
         else
             $this->primaryKeys = [$table . '_id'];
         $this->ignoreDifferenceForFields = array_merge($this->ignoreDifferenceForFields, $ingoreDifferenceForFields);
+    }
+
+    /** Optional: the column types of $table decide how changesAsHTML formats a field that has no format */
+    public function setMetadata(?DatabaseMetadata $metadata): void {
+        $this->metadata = $metadata;
+        $this->columns = null;
     }
 
     public function setIgnoreDifferenceForFields(array $ignoreDifferenceForFields): void {
@@ -316,6 +337,11 @@ class Historian {
      *   'label'       replaces SqlUtils::toLabel($fieldName)
      *   'fieldPrefix', 'fieldSuffix'  around the label (around the whole value, for fields of a child)
      *   'valuePrefix', 'valueSuffix'  around each value (before and after)
+     *   'format'      number: '#,##0.00' (decimals = digits after the point, a comma: thousands separators); date, datetime, time: a php date()
+     *                 format, 'd-M-y H:i'. It is a number format when it has a # or is only 0 , and .
+     *   'decimals', 'commas'  number decimals and thousands separators (bool); 'separator', 'decimalPoint' the characters
+     *   'type'        'number', 'date', 'datetime', 'time' or 'text' (as it is): says what the field is
+     *                 No format: the column type (setMetadata) or else what the value looks like decides, see formatDecision()
      *   'child'       [fieldName => entry with these same keys], for a field that holds child lines keyed by the
      *                 line's key (items => [101 => [...], 102 => [...]]). A changed line prints one row: all its
      *                 listed fields in that sequence, before and after (12 circles 3.14), then any other field of
@@ -338,7 +364,7 @@ class Historian {
                         $html .= $this->fieldAsHTML((string)$field, $diffData, $change['record'][$field] ?? [], $fieldFormat[$field]);
                         continue;
                     }
-                    [$before, $after] = $this->diffSidesAsText($diffData);
+                    [$before, $after] = $this->diffSidesAsText($diffData, (string)$field);
                     $html .= '<tr><td>' . SqlUtils::toLabel($field) . '<td>' . $before . '<td>' . $after;
                 }
                 $html .= '</tbody></table>';
@@ -346,8 +372,8 @@ class Historian {
         return  $html . '</tbody></table>';
     }
 
-    /** @return array{0: string, 1: string} before and after text of a field's diff */
-    protected function diffSidesAsText(array $diffData): array {
+    /** @return array{0: string, 1: string} before and after text of a field's diff, numbers, dates and times formatted (see formatDecision()) */
+    protected function diffSidesAsText(array $diffData, string $field = '', array $format = []): array {
         if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData)) {
             // nested record, differ() returned [subField => [before, after]]
             $side = static fn(string $which): string => json_encode(array_map(
@@ -356,8 +382,8 @@ class Historian {
             return [$side('before'), $side('after')];
         }
         return [
-          is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'],
-          is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'],
+          is_array($diffData['before']) ? json_encode($diffData['before']) : $this->formatted($field, $diffData['before'], $format),
+          is_array($diffData['after']) ? json_encode($diffData['after']) : $this->formatted($field, $diffData['after'], $format),
         ];
     }
 
@@ -367,7 +393,7 @@ class Historian {
         $label = ($format['fieldPrefix'] ?? '') . ($format['label'] ?? SqlUtils::toLabel($field)) . ($format['fieldSuffix'] ?? '');
 
         if(!isset($format['child']) || !is_array($format['child'])) {
-            [$before, $after] = $this->diffSidesAsText($diffData);
+            [$before, $after] = $this->diffSidesAsText($diffData, $field, $format);
             return '<tr' . $class . '><td>' . $label . '<td>' . ($format['valuePrefix'] ?? '') . $before . ($format['valueSuffix'] ?? '') .
               '<td>' . ($format['valuePrefix'] ?? '') . $after . ($format['valueSuffix'] ?? '');
         }
@@ -450,16 +476,16 @@ class Historian {
             $class = isset($format['class']) ? ' class="' . $format['class'] . '"' : '';
             $title = ' title="' . ($format['label'] ?? SqlUtils::toLabel((string)$field)) . '"';
             $columns[] = ($format['fieldPrefix'] ?? '') . '<span' . $class . $title . '>' . ($format['valuePrefix'] ?? '') .
-              $this->childValueAsHTML($line[$field] ?? null, $format) . ($format['valueSuffix'] ?? '') . '</span>' . ($format['fieldSuffix'] ?? '');
+              $this->childValueAsHTML($line[$field] ?? null, $format, (string)$field) . ($format['valueSuffix'] ?? '') . '</span>' . ($format['fieldSuffix'] ?? '');
         }
         foreach($extra as $field)
-            $columns[] = '<span>' . SqlUtils::toLabel((string)$field) . ': ' . $this->childValueAsHTML($line[$field] ?? null, []) . '</span>';
+            $columns[] = '<span>' . SqlUtils::toLabel((string)$field) . ': ' . $this->childValueAsHTML($line[$field] ?? null, [], (string)$field) . '</span>';
         return implode(' ', $columns);
     }
 
-    protected function childValueAsHTML(mixed $value, array $format): string {
+    protected function childValueAsHTML(mixed $value, array $format, string $field = ''): string {
         if(!is_array($value))
-            return (string)$value;
+            return (string)$this->formatted($field, $value, $format);
         if(!isset($format['child']) || !is_array($format['child']))
             return json_encode($value, JSON_UNESCAPED_UNICODE);
         $lines = [];
@@ -467,6 +493,151 @@ class Historian {
             if(is_array($line))
                 $lines[] = $this->childLineAsHTML($line, $format['child'], array_diff(array_keys($line), array_keys($format['child']), $this->ignoreDifferenceForFields));
         return implode('; ', $lines);
+    }
+
+    /**
+     * Decides how a value shows in changesAsHTML. Pure: no I/O but the column types, read once (setMetadata).
+     *
+     * Order: $format 'type' => 'text' (as it is); 'type', or a 'format' (a number format has # or is only 0 , . ; else a date format), or 'decimals' / 'commas'
+     * say what it is; else the column type of the field in $table (decimal and float: number, int: number with 0 decimals, date, datetime, timestamp,
+     * time, any other type: as it is); else what the value looks like: yyyy-mm-dd, yyyy-mm-dd hh:mm:ss, hh:mm:ss, a number. A number that
+     * looks like a code (leading zero, more than 15 digits) or a field that is an identifier is left as it is when nothing says otherwise.
+     * Number decimals: the format's, 'decimals', the column's scale, DefaultDecimals. Thousands separators: the format's, 'commas', not for identifiers.
+     *
+     * @return array{code: string, reason: string, data?: array} code: raw (as it is), number, date, datetime, time
+     */
+    protected function formatDecision(string $field, mixed $value, array $format): array {
+        if($value === null || is_bool($value) || is_array($value) || trim((string)$value) === '')
+            return ['code' => 'raw', 'reason' => 'no value'];
+        $text = trim((string)$value);
+        $type = $format['type'] ?? null;
+        $pattern = is_string($format['format'] ?? null) ? $format['format'] : null;
+        if($type === 'text')
+            return ['code' => 'raw', 'reason' => 'type text'];
+
+        $column = null;
+        $explicit = $type !== null || $pattern !== null || isset($format['decimals']) || isset($format['commas']);
+        if(in_array($type, ['number', 'date', 'datetime', 'time'], true))
+            $kind = $type;
+        elseif($pattern !== null)
+            $kind = $this->isNumberFormat($pattern) ? 'number' : 'date';
+        elseif(isset($format['decimals']) || isset($format['commas']))
+            $kind = 'number';
+        elseif(($column = $this->column($field)) !== null)
+            $kind = $this->kindOfDataType((string)($column['data_type'] ?? ''));
+        else
+            $kind = $this->dateKind($text) ?? (is_numeric($text) ? 'number' : 'raw');
+
+        if($kind === 'raw')
+            return ['code' => 'raw', 'reason' => 'not a number or a date'];
+
+        if($kind !== 'number') { // date, datetime or time: what the value is gives the default format
+            $valueKind = $this->dateKind($text);
+            if($valueKind === null)
+                return ['code' => 'raw', 'reason' => 'not a valid date or time'];
+            return ['code' => $valueKind, 'reason' => 'date', 'data' => ['format' => $pattern ?? self::$DateFormats[$valueKind]]];
+        }
+
+        if(!is_numeric($text))
+            return ['code' => 'raw', 'reason' => 'not numeric'];
+        $isIdentifier = $this->isIdentifierName($field);
+        if(!$explicit && $column === null && ($isIdentifier || preg_match('/^[+-]?0\d/', $text) || strlen(preg_replace('/\D/', '', $text)) > 15))
+            return ['code' => 'raw', 'reason' => 'identifier or code'];
+
+        $decimals = self::$DefaultDecimals;
+        if($pattern !== null && $this->isNumberFormat($pattern))
+            $decimals = ($point = strpos($pattern, '.')) === false ? 0 : strlen($pattern) - $point - 1;
+        elseif(isset($format['decimals']))
+            $decimals = (int)$format['decimals'];
+        elseif($column !== null)
+            $decimals = $this->scaleOfColumn($column);
+        $decimals = max(0, min(15, $decimals)); // a mistyped 'decimals' => 1000000000 must not exhaust the memory
+        $commas = $pattern !== null && $this->isNumberFormat($pattern) ? str_contains($pattern, ',') : (bool)($format['commas'] ?? !$isIdentifier);
+        return ['code' => 'number', 'reason' => 'number', 'data' => [
+          'decimals' => $decimals,
+          'separator' => $commas ? (string)($format['separator'] ?? ',') : '',
+          'decimalPoint' => (string)($format['decimalPoint'] ?? '.'),
+        ]];
+    }
+
+    /** Executor of formatDecision(): the value as it shows, as it is when nothing applies */
+    protected function formatted(string $field, mixed $value, array $format = []): mixed {
+        $decision = $this->formatDecision($field, $value, $format);
+        $text = trim((string)$value);
+        switch($decision['code']) {
+            case 'number':
+                $d = $decision['data'];
+                return SqlUtils::bcformat($text, $d['decimals'], $d['separator'], $d['decimalPoint']);
+            case 'date':
+            case 'datetime':
+            case 'time':
+                // gmdate and UTC: no timezone or daylight saving shifts a stored value
+                $negative = $decision['code'] === 'time' && str_starts_with($text, '-'); // a negative time: formatted without the - and the - put back
+                $time = strtotime(ltrim($text, '-') . ' UTC');
+                if($time === false)
+                    return $value;
+                $out = gmdate($decision['data']['format'], $time);
+                return ($negative ? '-' : '') . (empty(self::$Words) ? $out : strtr($out, self::$Words));
+        }
+        return $value;
+    }
+
+    /** A number format has a # or is only made of 0 , and . ('#,##0.00', '0.00'); any other format is a php date() format */
+    protected function isNumberFormat(string $format): bool {
+        return str_contains($format, '#') || preg_match('/^[0,.]+$/', $format) === 1;
+    }
+
+    /** date, datetime, time or null when the value is not a valid one: zero dates, 24 hours or more, a day that does not exist. A time may be negative */
+    protected function dateKind(string $value): ?string {
+        if(preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?$/', $value, $m)) {
+            if(!checkdate((int)$m[2], (int)$m[3], (int)$m[1]))
+                return null;
+            if(!isset($m[4]))
+                return 'date';
+            return (int)$m[4] < 24 && (int)$m[5] < 60 && (int)$m[6] < 60 ? 'datetime' : null;
+        }
+        if(preg_match('/^-?(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?$/', $value, $m)) // a negative time: mysql TIME
+            return (int)$m[1] < 24 && (int)$m[2] < 60 && (int)$m[3] < 60 ? 'time' : null;
+        return null;
+    }
+
+    /** Identifier or number that is not an amount (id, customer_id, numero, folioNumber): no thousands separators */
+    protected function isIdentifierName(string $field): bool {
+        $words = explode('_', mb_strtolower(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $field)));
+        return end($words) === 'id' || !empty(array_intersect($words, self::$NoCommasNames));
+    }
+
+    protected function kindOfDataType(string $dataType): string {
+        return match(strtolower($dataType)) {
+            'decimal', 'numeric', 'float', 'double', 'real', 'tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint' => 'number',
+            'date' => 'date',
+            'datetime', 'timestamp' => 'datetime',
+            'time' => 'time',
+            default => 'raw',
+        };
+    }
+
+    /** decimal: its scale; integers: 0; float and double: DefaultDecimals */
+    protected function scaleOfColumn(array $column): int {
+        return match(strtolower((string)($column['data_type'] ?? ''))) {
+            'decimal', 'numeric' => (int)($column['numeric_scale'] ?? self::$DefaultDecimals),
+            'tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint' => 0,
+            default => self::$DefaultDecimals,
+        };
+    }
+
+    /** The column of $table, null when there is no metadata, the field is not a column of the table (child lines, dropped columns) or the metadata fails */
+    protected function column(string $field): ?array {
+        if($this->metadata === null)
+            return null;
+        if($this->columns === null) {
+            try {
+                $this->columns = $this->metadata->table($this->table);
+            } catch(\Throwable) {
+                $this->columns = []; // formatting must not break reading the history
+            }
+        }
+        return $this->columns[$field] ?? null;
     }
 
     protected function primaryKeyEncode(array $values):string {
@@ -597,8 +768,8 @@ class Historian {
     protected function diff(array $recordHistory, bool $oldestIsLast = false): array {
         $records = array_values($recordHistory);  // Reindex for sequential access
         $count = count($records);
-        if($count < 1)
-            return [];
+        if($count < 1 || ($count === 1 && ($records[0]['action'] ?? '') !== 'delete'))
+            return []; // a lone row is returned only when it is a delete, it is not compared with anything
 
         $diff = [];
         for($i = 0; $i < $count - 1 || ($oldestIsLast && $i < $count); ++$i) {

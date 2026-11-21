@@ -284,7 +284,7 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame([1, 2, 3], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
-    public function testDeleteRowIdenticalToPreviousIsSkippedButChangedOneIsKept(): void {
+    public function testDeleteRowIsKeptEvenWhenIdenticalToPrevious(): void {
         $this->mockSqlExecutor->method('arrayKeyed')->willReturn([
           1 => self::row(1, ['name' => 'A'], 'insert'),
           2 => self::row(2, ['name' => 'A'], 'delete'),
@@ -294,7 +294,8 @@ class HistorianChangedRecordsTest extends TestCase {
 
         $changed = $this->historian->getChangedRecords(self::PK);
 
-        self::assertSame([1, 3, 4], array_keys($changed));
+        self::assertSame([1, 2, 3, 4], array_keys($changed));
+        self::assertSame('delete', $changed[2]['action']);
         self::assertSame('delete', $changed[4]['action']);
     }
 
@@ -1078,7 +1079,7 @@ class HistorianChangedRecordsTest extends TestCase {
         $changed = $this->historian->getChangedRecords(self::PK);
         $fields = $this->historian->getFieldChanges($changed);
 
-        self::assertSame([1, 3, 4, 5], array_keys($changed));
+        self::assertSame([1, 3, 4, 5, 6], array_keys($changed)); // the delete row (6) changed nothing and is kept
         self::assertSame([
           'name' => ['added' => [1], 'modified' => [4], 'deleted' => []],
           'price' => ['added' => [1], 'modified' => [3], 'deleted' => []],
@@ -1086,13 +1087,13 @@ class HistorianChangedRecordsTest extends TestCase {
         ], $fields);
 
         $priceOnly = $this->historian->getChangedRecords(self::PK, ['price']);
-        self::assertSame([1, 3], array_keys($priceOnly));
+        self::assertSame([1, 3, 6], array_keys($priceOnly));
         self::assertSame(
           ['price' => ['added' => [1], 'modified' => [3], 'deleted' => []]],
           $this->historian->getFieldChanges($priceOnly, ['price'])
         );
 
         $lastChange = $this->historian->getChangedRecords(self::PK, ['last_change']);
-        self::assertSame([1, 2, 3, 4, 5], array_keys($lastChange));
+        self::assertSame([1, 2, 3, 4, 5, 6], array_keys($lastChange));
     }
 }
