@@ -550,8 +550,8 @@ class HistorianChangedRecordsTest extends TestCase {
 
         $fields = $this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK));
 
-        // loose comparison: against the missing (null) base, 0, false and '' are equal to null so they are not a change
-        self::assertSame(['name'], array_keys($fields));
+        // null versus a value (0, false, '') is a change, null versus null is not
+        self::assertSame(['name', 'qty', 'flag', 'text'], array_keys($fields), 'null valued field is not a change');
         foreach($fields as $field)
             self::assertSame(['added' => [4], 'modified' => [], 'deleted' => []], $field);
     }
@@ -667,6 +667,14 @@ class HistorianChangedRecordsTest extends TestCase {
           'value to null' => ['x', null, 'deleted'],
           'string to string' => ['x', 'y', 'modified'],
           'int to int' => [1, 2, 'modified'],
+          'zero to null' => [0, null, 'deleted'],
+          'null to zero' => [null, 0, 'added'],
+          'false to null' => [false, null, 'deleted'],
+          'null to false' => [null, false, 'added'],
+          'empty string to null' => ['', null, 'deleted'],
+          'null to empty string' => [null, '', 'added'],
+          'string zero to null' => ['0', null, 'deleted'],
+          'null to string zero' => [null, '0', 'added'],
           'empty string to value' => ['', 'x', 'modified'],
           'value to empty string' => ['x', '', 'modified'],
           'false to true' => [false, true, 'modified'],
@@ -749,6 +757,35 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
+    #[DataProvider('nullVersusValueProvider')]
+    public function testNullVersusAnyValueIsAChange(mixed $before, mixed $after): void {
+        $this->givenRecords([1 => ['filler' => 1, 'v' => $before], 2 => ['filler' => 1, 'v' => $after]]);
+
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public static function nullVersusValueProvider(): array {
+        return [
+          'zero and null' => [0, null], 'null and zero' => [null, 0],
+          'false and null' => [false, null], 'null and false' => [null, false],
+          'empty string and null' => ['', null], 'null and empty string' => [null, ''],
+          'string zero and null' => ['0', null], 'null and string zero' => [null, '0'],
+          'empty array and null' => [[], null], 'null and empty array' => [null, []],
+        ];
+    }
+
+    public function testMissingKeyVersusZeroOrEmptyIsAChange(): void {
+        $this->givenRecords([1 => ['a' => 1], 2 => ['a' => 1, 'b' => 0], 3 => ['a' => 1, 'b' => ''], 4 => ['a' => 1]]);
+
+        self::assertSame([1, 2, 3, 4], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testNullToNullIsNotAChange(): void {
+        $this->givenRecords([1 => ['a' => 1, 'b' => null], 2 => ['a' => 1, 'b' => null], 3 => ['a' => 1]]);
+
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
     #[DataProvider('looselyEqualProvider')]
     public function testLooselyEqualValuesAreNotAChange(mixed $before, mixed $after): void {
         $this->givenRecords([1 => ['filler' => 1, 'v' => $before], 2 => ['filler' => 1, 'v' => $after]]);
@@ -758,9 +795,6 @@ class HistorianChangedRecordsTest extends TestCase {
 
     public static function looselyEqualProvider(): array {
         return [
-          'zero and null' => [0, null], 'null and zero' => [null, 0],
-          'false and null' => [false, null], 'null and false' => [null, false],
-          'empty string and null' => ['', null], 'null and empty string' => [null, ''],
           'zero and false' => [0, false], 'int and numeric string' => [1, '1'],
           'decimal strings' => ['1.10', '1.1'], 'exponent string' => ['1e3', '1000'],
           'leading zeros' => ['007', '7'],
