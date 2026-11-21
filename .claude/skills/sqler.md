@@ -240,6 +240,21 @@ $records = $historian->getChangedRecords(['order_id' => 42], ['status', 'last_ch
 $fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
 ```
 
+**Parent / child (invoice + items):** register the children inside the parent record under one key, keyed by the
+line's pk: `'items' => [101 => $lineRow, 102 => $lineRow]` (not a positional list: a removed line would shift all
+the others). Diffs, ignored fields and `$onlyFields` work inside the lines; `$onlyFields` accepts paths:
+`getChangedRecords($pk, ['items.price'])` / `getFieldChanges($records, ['items.price'])` (key `'items.price'`,
+a row with several kinds is listed under each). `'items.101.price'` = one line. HTML:
+
+```php
+echo $historian->changesAsHTML($changes, [   // only the table is affected, nothing is escaped
+    'total' => ['class' => 'money', 'valuePrefix' => '$'],
+    'items' => ['label' => 'Lines', 'class' => 'lines', 'child' => [   // sequence = column order
+        'quantity' => [], 'product' => [], 'price' => ['valuePrefix' => '$'],   // class, label, field/valuePrefix/Suffix, child
+    ]],
+]);   // changed line: "12 circles 3.14" before and after, plus other changed fields labeled
+```
+
 **Values stay strings:** register the row exactly as SQL returned it (numbers, dates, datetimes and times are
 strings) and Historian never converts anything: `register()` stores values as given and reading keeps them as
 stored. Comparison is LOOSE (`!=`): `'1.10'` = `'1.1'`, `1` = `'1'`; but null versus `0`, `''` or `false` IS a change, and so is bool versus non-bool (`0` vs `false`, `''` vs `false`). Don't cast values to int/float before registering.

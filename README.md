@@ -199,6 +199,14 @@ $fields = $historian->getFieldChanges($records);
 // Restrict to some fields (they count even if they are in the ignored fields)
 $records = $historian->getChangedRecords(['id' => 123], ['email']);
 $fields  = $historian->getFieldChanges($records, ['email']);
+
+// Parent/child (invoice + items, keyed by the line's pk): paths reach the lines' fields
+$fields = $historian->getFieldChanges($records, ['items.price']);
+
+// Control how the HTML table is built (nothing is escaped); 'child' lists the line's fields in order
+echo $historian->changesAsHTML($changes, [
+    'items' => ['label' => 'Lines', 'child' => ['quantity' => [], 'product' => [], 'price' => []]],
+]);
 ```
 
 ## Advanced Features

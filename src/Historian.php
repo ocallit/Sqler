@@ -29,7 +29,8 @@ use function is_array;
  *   - getLastChange($pk): last 2 changes
  *   - getChangedRecords($pk, $onlyFields=[]): full rows that changed, keyed by history_id, oldest first
  *   - getFieldChanges($changedRecords, $onlyFields=[]): fieldName => [added=>[ids], modified=>[ids], deleted=>[ids]]
- *   - changesAsHTML($changes): string
+ *   - changesAsHTML($changes, $fieldFormat=[]): string, $fieldFormat per field: class, label, fieldPrefix/Suffix, valuePrefix/Suffix, child
+ *   - $onlyFields entries may be paths into child lines: 'items.price'
  *
  * Values: SQL returns strings (numbers, dates, datetimes, times) and they must stay strings: register() stores values
  *   as given, nothing is converted when reading; JSON_BIGINT_AS_STRING is the only number flag json_decode offers.
@@ -198,26 +199,57 @@ class Historian {
      * Which history rows added, modified or deleted each field.
      * added: field went from missing/null to a value; deleted: from a value to missing/null; modified: any other change.
      *
+     * $onlyFields entries with a dot are paths into child lines, 'items.price' reports under the key 'items.price'
+     * every history row where the price of some line was added (new line or value), modified or deleted (removed
+     * line or value). A row with several kinds (a new line and a changed one) is listed under each kind.
+     * Other entries are plain field names, reported as before.
+     *
      * @param array $changedRecords result of getChangedRecords()
-     * @param string[] $onlyFields only report these fields, empty: all fields
+     * @param string[] $onlyFields only report these fields or 'collection.field' paths, empty: all fields
      * @return array<string, array{added: int[], modified: int[], deleted: int[]}> fieldName => history_ids, date sorted
      */
     public function getFieldChanges(array $changedRecords, array $onlyFields = []): array {
+        $names = [];
+        $paths = [];
+        foreach($onlyFields as $onlyField)
+            if(str_contains($onlyField, '.'))
+                $paths[] = $onlyField;
+            else
+                $names[] = $onlyField;
+        $ignore = array_diff($this->ignoreDifferenceForFields, ...array_map(fn(string $p): array => explode('.', $p), $paths));
+
         $fieldChanges = [];
         $previous = [];
         foreach($changedRecords as $historyId => $row) {
-            foreach($this->differFields($previous, $row['record'], $onlyFields) as $field => $diffData) {
-                if(!array_key_exists($field, $fieldChanges))
-                    $fieldChanges[$field] = ['added' => [], 'modified' => [], 'deleted' => []];
-                if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData))
-                    $kind = 'modified'; // nested record
-                elseif($diffData['before'] === null)
-                    $kind = 'added';
-                elseif($diffData['after'] === null)
-                    $kind = 'deleted';
-                else
-                    $kind = 'modified';
-                $fieldChanges[$field][$kind][] = $historyId;
+            if(empty($onlyFields) || !empty($names)) {
+                foreach($this->differFields($previous, $row['record'], $names) as $field => $diffData) {
+                    if(!array_key_exists($field, $fieldChanges))
+                        $fieldChanges[$field] = ['added' => [], 'modified' => [], 'deleted' => []];
+                    $leaf = array_key_exists('before', $diffData) && array_key_exists('after', $diffData);
+                    $kind = $leaf ? $this->changeKind($diffData['before'], $diffData['after']) : 'modified'; // else nested record
+                    $fieldChanges[$field][$kind][] = $historyId;
+                }
+            }
+            foreach($paths as $path) {
+                $segments = explode('.', $path);
+                $before = $this->valuesAtPath($previous, $segments);
+                $after = $this->valuesAtPath($row['record'], $segments);
+                $kinds = [];
+                foreach(array_unique(array_merge(array_keys($before), array_keys($after))) as $line) {
+                    $beforeValue = $before[$line] ?? null;
+                    $afterValue = $after[$line] ?? null;
+                    $changed = is_array($beforeValue) && is_array($afterValue)
+                      ? !empty($this->differ($beforeValue, $afterValue, $ignore))
+                      : $this->valuesDiffer($beforeValue, $afterValue);
+                    if($changed)
+                        $kinds[$this->changeKind($beforeValue, $afterValue)] = true;
+                }
+                if(empty($kinds))
+                    continue;
+                if(!array_key_exists($path, $fieldChanges))
+                    $fieldChanges[$path] = ['added' => [], 'modified' => [], 'deleted' => []];
+                foreach($kinds as $kind => $unused)
+                    $fieldChanges[$path][$kind][] = $historyId;
             }
             $previous = $row['record'];
         }
@@ -278,10 +310,23 @@ class Historian {
      *  Renders trusted HTML. Callers must escape or sanitize every supplied value before rendering.
      *  HTML is intentionally not escaped here; upstream code owns that responsibility.
      *
+     * $fieldFormat only affects how the table is built. It is keyed by field name, a field without an entry is shown
+     * as always. Every key of an entry is optional, nothing in it is escaped:
+     *   'class'       css class(es) of the field's row (of the value, for fields of a child)
+     *   'label'       replaces SqlUtils::toLabel($fieldName)
+     *   'fieldPrefix', 'fieldSuffix'  around the label (around the whole value, for fields of a child)
+     *   'valuePrefix', 'valueSuffix'  around each value (before and after)
+     *   'child'       [fieldName => entry with these same keys], for a field that holds child lines keyed by the
+     *                 line's key (items => [101 => [...], 102 => [...]]). A changed line prints one row: all its
+     *                 listed fields in that sequence, before and after (12 circles 3.14), then any other field of
+     *                 the line that changed, labeled. Only ignored fields are left out. Added line: empty before,
+     *                 deleted line: empty after (their other fields show when they have a value). Deeper levels print all their lines, never only the changed ones.
+     *
      * @param array $changes
+     * @param array<string, array<string, mixed>> $fieldFormat
      * @return string HTML table representing the change's history.
      */
-    public function changesAsHTML(array $changes): string {
+    public function changesAsHTML(array $changes, array $fieldFormat = []): string {
         $html = '<table class="laTabla"><tbody>';
         foreach ($changes as $change) {
             if(empty($change['diff']))
@@ -289,22 +334,139 @@ class Historian {
             $html .= '<tr>' . '<td class="cen">' . $change['date'] . '<br>' . $change['action'] . '<br>' . $change['user_nick'] .
                 '<td><table><thead><tr><th> <th>Era<th>Cambio A:</tr></thead><tbody>';
                 foreach ($change['diff'] as $field => $diffData) {
-                    if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData)) {
-                        // nested record, differ() returned [subField => [before, after]]
-                        $side = static fn(string $which): string => json_encode(array_map(
-                          static fn($d) => is_array($d) && array_key_exists($which, $d) ? $d[$which] : $d, $diffData
-                        ), JSON_UNESCAPED_UNICODE);
-                        $before = $side('before');
-                        $after = $side('after');
-                    } else {
-                        $before = is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'];
-                        $after = is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'];
+                    if(array_key_exists($field, $fieldFormat)) {
+                        $html .= $this->fieldAsHTML((string)$field, $diffData, $change['record'][$field] ?? [], $fieldFormat[$field]);
+                        continue;
                     }
+                    [$before, $after] = $this->diffSidesAsText($diffData);
                     $html .= '<tr><td>' . SqlUtils::toLabel($field) . '<td>' . $before . '<td>' . $after;
                 }
                 $html .= '</tbody></table>';
         }
         return  $html . '</tbody></table>';
+    }
+
+    /** @return array{0: string, 1: string} before and after text of a field's diff */
+    protected function diffSidesAsText(array $diffData): array {
+        if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData)) {
+            // nested record, differ() returned [subField => [before, after]]
+            $side = static fn(string $which): string => json_encode(array_map(
+              static fn($d) => is_array($d) && array_key_exists($which, $d) ? $d[$which] : $d, $diffData
+            ), JSON_UNESCAPED_UNICODE);
+            return [$side('before'), $side('after')];
+        }
+        return [
+          is_array($diffData['before']) ? json_encode($diffData['before']) : $diffData['before'],
+          is_array($diffData['after']) ? json_encode($diffData['after']) : $diffData['after'],
+        ];
+    }
+
+    /** One field of changesAsHTML() that has a $fieldFormat entry. $collection is the field's value in the change's record. */
+    protected function fieldAsHTML(string $field, array $diffData, mixed $collection, array $format): string {
+        $class = isset($format['class']) ? ' class="' . $format['class'] . '"' : '';
+        $label = ($format['fieldPrefix'] ?? '') . ($format['label'] ?? SqlUtils::toLabel($field)) . ($format['fieldSuffix'] ?? '');
+
+        if(!isset($format['child']) || !is_array($format['child'])) {
+            [$before, $after] = $this->diffSidesAsText($diffData);
+            return '<tr' . $class . '><td>' . $label . '<td>' . ($format['valuePrefix'] ?? '') . $before . ($format['valueSuffix'] ?? '') .
+              '<td>' . ($format['valuePrefix'] ?? '') . $after . ($format['valueSuffix'] ?? '');
+        }
+
+        $html = '';
+        foreach($this->childLines($diffData, is_array($collection) ? $collection : []) as $line) {
+            $changedNames = $line['changed'] ?? array_keys(array_filter($line['before'] ?? $line['after'] ?? [], static fn($v) => $v !== null));
+            $extra = array_values(array_diff($changedNames, array_keys($format['child']), $this->ignoreDifferenceForFields));
+            $html .= '<tr' . $class . '><td>' . $label .
+              '<td>' . $this->childLineAsHTML($line['before'], $format['child'], $extra) .
+              '<td>' . $this->childLineAsHTML($line['after'], $format['child'], $extra);
+        }
+        return $html;
+    }
+
+    /**
+     * The lines of a child collection that changed, in order, each with its full before and after
+     * (null before: new line, null after: deleted line) and, for a changed line, the names of its changed fields.
+     *
+     * @param array $diffData the field's diff
+     * @param array $collection the field's value in the change's record (all current lines)
+     * @return array<int, array{before: ?array, after: ?array, changed?: string[]}>
+     */
+    protected function childLines(array $diffData, array $collection): array {
+        $lines = [];
+        if(array_key_exists('before', $diffData) && array_key_exists('after', $diffData)) {
+            // whole collection added, deleted or replaced
+            $before = is_array($diffData['before']) ? $diffData['before'] : [];
+            $after = is_array($diffData['after']) ? $diffData['after'] : [];
+            foreach(array_unique(array_merge(array_keys($before), array_keys($after))) as $key)
+                $lines[] = [
+                  'before' => is_array($before[$key] ?? null) ? $before[$key] : null,
+                  'after' => is_array($after[$key] ?? null) ? $after[$key] : null,
+                ];
+            return $lines;
+        }
+        foreach($diffData as $key => $lineDiff) {
+            if(array_key_exists('before', $lineDiff) && array_key_exists('after', $lineDiff)) {
+                $lines[] = [
+                  'before' => is_array($lineDiff['before']) ? $lineDiff['before'] : null,
+                  'after' => is_array($lineDiff['after']) ? $lineDiff['after'] : null,
+                ];
+                continue;
+            }
+            $after = is_array($collection[$key] ?? null) ? $collection[$key] : [];
+            $lines[] = ['before' => $this->beforeFromDiff($after, $lineDiff), 'after' => $after, 'changed' => array_keys($lineDiff)];
+        }
+        return $lines;
+    }
+
+    /** The record as it was before $diff: the current record with the changed values put back. */
+    protected function beforeFromDiff(array $after, array $diff): array {
+        $before = $after;
+        foreach($diff as $key => $change) {
+            if(array_key_exists('before', $change) && array_key_exists('after', $change)) {
+                if($change['before'] === null)
+                    unset($before[$key]);
+                else
+                    $before[$key] = $change['before'];
+            }
+            else
+                $before[$key] = $this->beforeFromDiff(is_array($after[$key] ?? null) ? $after[$key] : [], $change);
+        }
+        return $before;
+    }
+
+    /**
+     * One side (before or after) of a child line: its listed fields in sequence, then the $extra changed fields
+     * labeled, joined by a space. Nothing for a missing line.
+     *
+     * @param ?array $line
+     * @param array<string, array<string, mixed>> $childFormat
+     * @param string[] $extra changed fields that are not listed in $childFormat
+     */
+    protected function childLineAsHTML(?array $line, array $childFormat, array $extra): string {
+        if($line === null)
+            return '';
+        $columns = [];
+        foreach($childFormat as $field => $format) {
+            $class = isset($format['class']) ? ' class="' . $format['class'] . '"' : '';
+            $title = ' title="' . ($format['label'] ?? SqlUtils::toLabel((string)$field)) . '"';
+            $columns[] = ($format['fieldPrefix'] ?? '') . '<span' . $class . $title . '>' . ($format['valuePrefix'] ?? '') .
+              $this->childValueAsHTML($line[$field] ?? null, $format) . ($format['valueSuffix'] ?? '') . '</span>' . ($format['fieldSuffix'] ?? '');
+        }
+        foreach($extra as $field)
+            $columns[] = '<span>' . SqlUtils::toLabel((string)$field) . ': ' . $this->childValueAsHTML($line[$field] ?? null, []) . '</span>';
+        return implode(' ', $columns);
+    }
+
+    protected function childValueAsHTML(mixed $value, array $format): string {
+        if(!is_array($value))
+            return (string)$value;
+        if(!isset($format['child']) || !is_array($format['child']))
+            return json_encode($value, JSON_UNESCAPED_UNICODE);
+        $lines = [];
+        foreach($value as $line)
+            if(is_array($line))
+                $lines[] = $this->childLineAsHTML($line, $format['child'], array_diff(array_keys($line), array_keys($format['child']), $this->ignoreDifferenceForFields));
+        return implode('; ', $lines);
     }
 
     protected function primaryKeyEncode(array $values):string {
@@ -333,18 +495,102 @@ class Historian {
                 if(!empty($nested))
                     $diff[$key] = $nested;
             }
-            elseif(($beforeValue === null) !== ($afterValue === null) || is_bool($beforeValue) !== is_bool($afterValue) || $beforeValue != $afterValue)
+            elseif($this->valuesDiffer($beforeValue, $afterValue))
                 $diff[$key] = ['before' => $beforeValue, 'after' => $afterValue];
         }
         return $diff;
     }
 
-    /** differ() restricted to $onlyFields, which win over ignored fields; empty $onlyFields: all non ignored fields */
+    /** The one rule for "is it a change" between two non array values, see differ() */
+    protected function valuesDiffer(mixed $before, mixed $after): bool {
+        return ($before === null) !== ($after === null) || is_bool($before) !== is_bool($after) || $before != $after;
+    }
+
+    /** added: null before, deleted: null after, modified: anything else */
+    protected function changeKind(mixed $before, mixed $after): string {
+        if($before === null)
+            return 'added';
+        return $after === null ? 'deleted' : 'modified';
+    }
+
+    /**
+     * differ() restricted to $onlyFields, which win over ignored fields; empty $onlyFields: all non ignored fields.
+     * An $onlyFields entry is a field name or a path 'items.price' (see projectPaths()). Every name in a path is
+     * un-ignored, at any depth.
+     */
     protected function differFields(array $before, array $after, array $onlyFields = []): array {
         if(empty($onlyFields))
             return $this->differ($before, $after);
-        $diff = $this->differ($before, $after, array_diff($this->ignoreDifferenceForFields, $onlyFields));
-        return array_intersect_key($diff, array_flip($onlyFields));
+        $paths = $this->onlyFieldsPaths($onlyFields);
+        return $this->differ(
+          $this->projectPaths($before, $paths),
+          $this->projectPaths($after, $paths),
+          array_diff($this->ignoreDifferenceForFields, array_merge(...$paths))
+        );
+    }
+
+    /** @param string[] $onlyFields 'field' or 'collection.field' entries @return string[][] each entry as list of names */
+    protected function onlyFieldsPaths(array $onlyFields): array {
+        return array_map(static fn(string $onlyField): array => explode('.', $onlyField), $onlyFields);
+    }
+
+    /**
+     * Keep of $record only what $paths list. 'items' keeps the whole field, ['items', 'price'] keeps the price of
+     * every line of items. Child lines are keyed by their own key (the line's pk), that key level is skipped when
+     * the path's next name is not a key of the collection, so 'items.price' reaches items[101]['price'].
+     * Lines are skipped only one level, and never at the top level ($fanOut false), so 'price' alone never
+     * reaches a nested price.
+     *
+     * @param string[][] $paths list of paths, each a list of names
+     */
+    protected function projectPaths(array $record, array $paths, bool $fanOut = false): array {
+        $projected = [];
+        foreach($record as $key => $value) {
+            $rest = [];
+            $whole = false;
+            foreach($paths as $path) {
+                if((string)$path[0] !== (string)$key)
+                    continue;
+                if(count($path) === 1) {
+                    $whole = true;
+                    break;
+                }
+                $rest[] = array_slice($path, 1);
+            }
+            if($whole) {
+                $projected[$key] = $value;
+                continue;
+            }
+            if(!is_array($value))
+                continue;
+            $part = !empty($rest) ? $this->projectPaths($value, $rest, true) : ($fanOut ? $this->projectPaths($value, $paths) : []);
+            if(!empty($part))
+                $projected[$key] = $part;
+        }
+        return $projected;
+    }
+
+    /**
+     * Values a path reaches in a record, keyed by the child line key ('' when there are no lines):
+     * 'name' => ['' => value], 'items.price' => [101 => '3.14', 102 => '2.00']
+     *
+     * @param string[] $path
+     * @return array<string|int, mixed>
+     */
+    protected function valuesAtPath(array $record, array $path, bool $fanOut = false): array {
+        if(array_key_exists($path[0], $record)) {
+            $value = $record[$path[0]];
+            if(count($path) === 1)
+                return ['' => $value];
+            return is_array($value) ? $this->valuesAtPath($value, array_slice($path, 1), true) : [];
+        }
+        $values = [];
+        if($fanOut)
+            foreach($record as $key => $line)
+                if(is_array($line))
+                    foreach($this->valuesAtPath($line, $path) as $sub => $value)
+                        $values[$sub === '' ? $key : $key . '/' . $sub] = $value;
+        return $values;
     }
 
     protected function diff(array $recordHistory): array {
