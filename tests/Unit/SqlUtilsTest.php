@@ -35,7 +35,7 @@ class SqlUtilsTest extends TestCase {
             // acronyms are lowercased first, so they come back as plain words
           'acronym_is_not_preserved' => ['ID', 'Id'],
           'acronym_inside_name' => ['user_ID', 'User Id'],
-            // digits are not letters: ucwords does not touch them
+            // digits are not letters and stay as they are; a letter right after a digit is capitalized (MB_CASE_TITLE), a letter after '_' always is
           'digit_in_name' => ['user2_name', 'User2 Name'],
           'starts_with_digit' => ['2nd_line', '2Nd Line'], // title case also capitalizes the letter after a digit
             // strtolower/ucwords are byte oriented: non ascii bytes pass through untouched
