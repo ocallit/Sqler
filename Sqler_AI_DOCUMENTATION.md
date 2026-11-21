@@ -363,10 +363,14 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 **`$onlyFields`**: only changes to these fields count. They win over ignored fields (an ignored field listed here is compared). Other ignored fields stay ignored. Empty = all non-ignored fields.
 **Not paginated**: reads the whole history of the record, oldest first (unlike `getChanges`, which is newest first with a limit).
 
+**`$onlyFields` paths (child records)**: an entry may be a path into child lines, `'items.price'` = the `price` of every line of `items`; `'items.101.price'` = only line 101. A plain name never reaches a nested field with the same name. Lines are skipped one level only. Names in a path are un-ignored (at that depth). Field names containing `.` cannot be used.
+
 #### `getFieldChanges(array $changedRecords, array $onlyFields = []): array`
 **Input**: the result of `getChangedRecords()`. Pass the same `$onlyFields` to both methods, otherwise other fields are reported too.
 **Returns**: `fieldName => ['added' => [history_id...], 'modified' => [...], 'deleted' => [...]]`, ids in the order of the given records (date sorted)
 **Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change. Comparison is LOOSE (`!=`, not strict): `'1.10'` = `'1.1'`, `'007'` = `'7'`, `1` = `'1'`, but null versus any value (`0`, `''`, `'0'`, `false`) IS a change, and so is a bool versus any non-bool (`0` vs `false`, `''` vs `false`, `1` vs `true`) (`0` → null is `deleted`, null → `''` is `added`). Decimals beyond float precision compare equal; two huge integer strings are still compared as text. A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
+
+**Path results**: a path reports under its own key (`'items.price'`) the history rows where some line's price was `added` (new line or value), `modified` or `deleted` (removed line or value). A row with several kinds (a new line and a changed one) is listed under each, once per kind.
 
 ```php
 $records = $historian->getChangedRecords(['id' => 42]);                 // all versions that changed
@@ -378,8 +382,25 @@ $records = $historian->getChangedRecords(['id' => 42], ['price']);
 $fields  = $historian->getFieldChanges($records, ['price']);
 ```
 
-#### `changesAsHTML(array $changes): string`
-**Returns**: HTML table representation of changes
+#### `changesAsHTML(array $changes, array $fieldFormat = []): string`
+**Returns**: HTML table representation of changes. Nothing is escaped (callers own escaping). `$fieldFormat` only changes how the table is built, never the data.
+**`$fieldFormat`**: keyed by field name; a field without an entry is shown as always. Every key of an entry is optional:
+- `class` css class(es): of the field's row; for a field of a child, of its value
+- `label` replaces `SqlUtils::toLabel($fieldName)`
+- `fieldPrefix`, `fieldSuffix`: around the label (around the whole value, for a field of a child)
+- `valuePrefix`, `valueSuffix`: around each value (before and after)
+- `child` `[fieldName => entry with these same keys]` for a field that holds child lines keyed by the line's key
+
+**Child lines**: register the collection keyed by the line's pk (`'items' => [101 => [...], 102 => [...]]`, not a positional list), so lines are matched by key: a removed line is `deleted`, a new one `added`, the others do not shift. One row per changed line (any non-ignored change): the listed fields in the sequence of `child`, before and after (`12 circles 3.14`), each as `<span title="Label">value</span>`, followed by any other field of the line that changed, labeled (`<span>Discount: 5</span>`). Only ignored fields are left out. Added line: empty before; deleted line: empty after (their other fields show when they have a value). A listed field that holds a collection and has its own `child` prints all its lines (`; ` separated) on each side.
+
+```php
+echo $historian->changesAsHTML($changes, [
+    'total' => ['class' => 'money', 'valuePrefix' => '$'],
+    'items' => ['label' => 'Lines', 'class' => 'lines', 'child' => [
+        'quantity' => [], 'product' => [], 'price' => ['valuePrefix' => '$'],
+    ]],
+]);
+```
 **Purpose**: Format change history for display
 
 #### `setIgnoreDifferenceForFields(array $ingoreDifferenceForFields): void`
