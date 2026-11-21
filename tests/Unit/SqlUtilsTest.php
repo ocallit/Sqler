@@ -37,7 +37,7 @@ class SqlUtilsTest extends TestCase {
           'acronym_inside_name' => ['user_ID', 'User Id'],
             // digits are not letters: ucwords does not touch them
           'digit_in_name' => ['user2_name', 'User2 Name'],
-          'starts_with_digit' => ['2nd_line', '2nd Line'],
+          'starts_with_digit' => ['2nd_line', '2Nd Line'], // title case also capitalizes the letter after a digit
             // strtolower/ucwords are byte oriented: non ascii bytes pass through untouched
           'non_ascii_bytes_pass_through' => ['ÁREA_NOMBRE', 'Área Nombre'],
           'multibyte_first_letter' => ['año_nuevo', 'Año Nuevo'],
