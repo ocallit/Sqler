@@ -38,7 +38,7 @@ class SqlUtilsTest extends TestCase {
             // digits are not letters and stay as they are; a letter right after a digit is capitalized (MB_CASE_TITLE), a letter after '_' always is
           'digit_in_name' => ['user2_name', 'User2 Name'],
           'starts_with_digit' => ['2nd_line', '2Nd Line'], // title case also capitalizes the letter after a digit
-            // strtolower/ucwords are byte oriented: non ascii bytes pass through untouched
+            // mb_strtolower and MB_CASE_TITLE are multibyte aware: non ascii letters are lowercased and capitalized too
           'non_ascii_bytes_pass_through' => ['ÁREA_NOMBRE', 'Área Nombre'],
           'multibyte_first_letter' => ['año_nuevo', 'Año Nuevo'],
           'multibyte_camel_case' => ['áreaNombre', 'Área Nombre'],
