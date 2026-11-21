@@ -101,6 +101,25 @@ class HistorianChangedRecordsTest extends TestCase {
         $this->historian->getChangedRecords(['other_id' => 1]);
     }
 
+    public function testDeleteRowIsAlwaysReturnedEvenWhenNothingChanged(): void {
+        $rec = ['name' => 'A'];
+        $rows = [1 => self::row(1, $rec, 'insert'), 2 => self::row(2, $rec, 'update'), 3 => self::row(3, $rec, 'delete')];
+        $this->givenHistory($rows);
+
+        self::assertSame([1, 3], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testGetChangesReturnsDeleteWithoutChangesAndAsOldestRow(): void {
+        $rec = ['name' => 'A'];
+        $this->givenHistory([3 => self::row(3, $rec, 'delete'), 2 => self::row(2, $rec, 'update'), 1 => self::row(1, $rec, 'delete')]);
+
+        $changes = $this->historian->getChanges(self::PK);
+
+        self::assertSame([3, 1], array_column($changes, 'history_id'));
+        self::assertSame([], $changes[0]['diff']);
+        self::assertSame(['name' => ['before' => null, 'after' => 'A']], $changes[1]['diff']);
+    }
+
     // ------------------------------------------------------------------ getChangedRecords: which rows
 
     public function testNoHistoryReturnsEmptyArray(): void {

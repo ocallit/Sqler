@@ -147,14 +147,14 @@ class Historian {
             ORDER BY `date` DESC, history_id DESC LIMIT ?, ?";
 
         $history = $this->sqlExecutor->arrayKeyed($sql, 'history_id', $params);
-        return $this->diff($history);
+        return $this->diff($history, count($history) <= $rows);
     }
 
     /**
      * Full history rows of a record that did change, oldest first, ignoring $ignoreDifferenceForFields.
      * HARD REQUIREMENT: the first (oldest) row is always returned, even if it has no values or none of $onlyFields,
      * it is the initial base every later row is compared against. Never filter it out.
-     * Later rows are included only if they differ from the previous included row.
+     * Later rows are included only if they differ from the previous included row, except a delete row: it is always included.
      *
      * @param array $primaryKeyValues
      * @param string[] $onlyFields only changes to these fields count (even if ignored), empty: all non ignored fields
@@ -187,8 +187,8 @@ class Historian {
                 throw new \UnexpectedValueException('History record must decode to an array.');
             $row['record'] = $this->normalizeRecordText($record);
 
-            if(!empty($changed) && empty($this->differFields($previous, $row['record'], $onlyFields)))
-                continue;
+            if(!empty($changed) && $row['action'] !== 'delete' && empty($this->differFields($previous, $row['record'], $onlyFields)))
+                continue; // a delete is always kept, even when no field changed
             $previous = $row['record'];
             $changed[$historyId] = $row;
         }
@@ -329,7 +329,7 @@ class Historian {
     public function changesAsHTML(array $changes, array $fieldFormat = []): string {
         $html = '<table class="laTabla"><tbody>';
         foreach ($changes as $change) {
-            if(empty($change['diff']))
+            if(empty($change['diff']) && $change['action'] !== 'delete')
                 continue;
             $html .= '<tr>' . '<td class="cen">' . $change['date'] . '<br>' . $change['action'] . '<br>' . $change['user_nick'] .
                 '<td><table><thead><tr><th> <th>Era<th>Cambio A:</tr></thead><tbody>';
@@ -593,16 +593,17 @@ class Historian {
         return $values;
     }
 
-    protected function diff(array $recordHistory): array {
+    /** @param bool $oldestIsLast the last row is the oldest of the record (not the extra row only compared against): it is returned only when it is a delete */
+    protected function diff(array $recordHistory, bool $oldestIsLast = false): array {
         $records = array_values($recordHistory);  // Reindex for sequential access
         $count = count($records);
-        if($count < 2)
+        if($count < 1)
             return [];
 
         $diff = [];
-        for($i = 0; $i < $count - 1; ++$i) {
+        for($i = 0; $i < $count - 1 || ($oldestIsLast && $i < $count); ++$i) {
             // Decode each record once, when it first participates in a comparison.
-            foreach($i === 0 ? [0, 1] : [$i + 1] as $index) {
+            foreach($i === 0 ? array_keys(array_slice($records, 0, 2)) : ($i + 1 < $count ? [$i + 1] : []) as $index) {
                 $record = json_decode(
                     json: $records[$index]['record'],
                     associative: true,
@@ -613,11 +614,11 @@ class Historian {
                 $records[$index]['record'] = $this->normalizeRecordText($record);
             }
             $current = $records[$i];
-            $older = $records[$i + 1];
+            $differ = $this->differ($records[$i + 1]['record'] ?? [], $current['record']); // no older row: the record was created by this one
 
-            $differ = $this->differ($older['record'], $current['record']);
-
-            if(empty($differ))
+            if(empty($differ) && $current['action'] !== 'delete')
+                continue; // a delete is always returned, even when no field changed
+            if($i === $count - 1 && $current['action'] !== 'delete')
                 continue;
 
             $diff[] = [
