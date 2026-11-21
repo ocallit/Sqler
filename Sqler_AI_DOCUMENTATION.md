@@ -358,7 +358,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 #### `getChangedRecords(array $primaryKeyValues, array $onlyFields = []): array`
 **Returns**: Full history rows that changed, keyed by `history_id`, sorted by date (oldest first)
 **Shape**: `[history_id => ['history_id', 'action', 'motive', 'date', 'user_nick', 'record' => decoded full row]]`
-**Purpose**: Timeline of the versions of a record. A row is kept only if it differs from the previous kept row (the first is compared against an empty record), so unchanged rows and rows differing only in ignored fields are skipped. Returned `record` always holds all fields.
+**Purpose**: Timeline of the versions of a record. **The first (oldest) row is always returned**, even if it has no values or none of `$onlyFields`: it is the initial base for comparison (hard requirement). Every later row is kept only if it differs from the previous kept row, so unchanged rows and rows differing only in ignored fields are skipped. Returned `record` always holds all fields.
 **`$onlyFields`**: only changes to these fields count. They win over ignored fields (an ignored field listed here is compared). Other ignored fields stay ignored. Empty = all non-ignored fields.
 **Not paginated**: reads the whole history of the record, oldest first (unlike `getChanges`, which is newest first with a limit).
 

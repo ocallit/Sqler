@@ -117,16 +117,37 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame([5], array_keys($changed));
     }
 
-    public function testFirstRowWithoutAnyValueIsNotAChange(): void {
+    public function testFirstRowIsAlwaysKeptEvenWithoutAnyValue(): void {
         $this->givenRecords([1 => [], 2 => ['name' => null]]);
 
-        self::assertSame([], $this->historian->getChangedRecords(self::PK));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
-    public function testFirstEmptyRowIsSkippedButLaterRowWithValuesIsKept(): void {
+    public function testFirstEmptyRowIsKeptAsBaseAndLaterRowWithValuesIsKept(): void {
         $this->givenRecords([1 => [], 2 => ['name' => 'A']]);
 
-        self::assertSame([2], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testFirstRowIsKeptEvenIfOnlyIgnoredFieldsHaveValues(): void {
+        $this->givenRecords([1 => ['last_change' => 1], 2 => ['last_change' => 2]]);
+
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testFirstRowIsKeptEvenIfItHasNoneOfTheOnlyFields(): void {
+        $this->givenRecords([1 => ['name' => 'A'], 2 => ['name' => 'B']]);
+
+        $changed = $this->historian->getChangedRecords(self::PK, ['price']);
+
+        self::assertSame([1], array_keys($changed));
+        self::assertSame(['name' => 'A'], $changed[1]['record']);
+    }
+
+    public function testFirstRowIsTheBaseForComparingLaterRows(): void {
+        $this->givenRecords([1 => ['name' => 'A', 'price' => 1], 2 => ['name' => 'B', 'price' => 1], 3 => ['name' => 'B', 'price' => 2]]);
+
+        self::assertSame([1, 3], array_keys($this->historian->getChangedRecords(self::PK, ['price'])));
     }
 
     public function testResultIsKeyedByHistoryIdAndKeepsDateOrder(): void {
@@ -426,19 +447,19 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['price'])));
     }
 
-    public function testOnlyFieldsFirstRowWithoutListedFieldValueIsNotAChange(): void {
+    public function testOnlyFieldsFirstRowWithoutListedFieldValueIsKeptAsBase(): void {
         $this->givenRecords([
           1 => ['name' => 'A'],
           2 => ['name' => 'A', 'price' => 5],
         ]);
 
-        self::assertSame([2], array_keys($this->historian->getChangedRecords(self::PK, ['price'])));
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK, ['price'])));
     }
 
-    public function testOnlyFieldsMatchingNoFieldReturnsEmpty(): void {
+    public function testOnlyFieldsMatchingNoFieldReturnsOnlyTheFirstRow(): void {
         $this->givenRecords([1 => ['name' => 'A'], 2 => ['name' => 'B']]);
 
-        self::assertSame([], $this->historian->getChangedRecords(self::PK, ['nonexistent']));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['nonexistent'])));
     }
 
     public function testEmptyOnlyFieldsMeansAllFields(): void {
@@ -466,7 +487,7 @@ class HistorianChangedRecordsTest extends TestCase {
         $historian = new Historian($this->mockSqlExecutor, 'test_table', [], ['version']);
         $this->givenRecords([1 => ['version' => 1], 2 => ['version' => 2]]);
 
-        self::assertSame([], $historian->getChangedRecords(self::PK));
+        self::assertSame([1], array_keys($historian->getChangedRecords(self::PK)));
         self::assertSame([1, 2], array_keys($historian->getChangedRecords(self::PK, ['version'])));
 
         $historian->setIgnoreDifferenceForFields(['version']);
@@ -487,7 +508,7 @@ class HistorianChangedRecordsTest extends TestCase {
 
         $this->historian->getChangedRecords(self::PK, ['last_change']);
 
-        self::assertSame([], $this->historian->getChangedRecords(self::PK));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
     public function testOnlyFieldsAppliesToNestedValuesOfAListedField(): void {
@@ -513,8 +534,8 @@ class HistorianChangedRecordsTest extends TestCase {
     public function testOnlyFieldsNamesAreMatchedExactly(): void {
         $this->givenRecords([1 => ['price' => 1], 2 => ['price' => 2]]);
 
-        self::assertSame([], $this->historian->getChangedRecords(self::PK, ['Price']));
-        self::assertSame([], $this->historian->getChangedRecords(self::PK, ['pric']));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['Price'])));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['pric'])));
     }
 
     // ------------------------------------------------------------------ getFieldChanges
