@@ -222,6 +222,24 @@ $recent = $historian->getNLastChanges(['order_id' => 42], 5);
 echo $historian->changesAsHTML($changes);
 ```
 
+### Versions of a record and who touched each field
+
+```php
+// Full rows that changed, keyed by history_id, oldest first (not paginated).
+// Rows that differ only in ignored fields are skipped; 'record' keeps every field.
+$records = $historian->getChangedRecords(['order_id' => 42]);
+
+// fieldName => ['added' => [ids], 'modified' => [ids], 'deleted' => [ids]]  (ids date sorted)
+$fields = $historian->getFieldChanges($records);
+// added = missing/null → value, deleted = value → missing/null, modified = anything else
+// nested array changes are reported on the top-level field as 'modified'
+
+// Only some fields: rows where none of them changed are dropped.
+// $onlyFields wins over ignored fields, and must be passed to BOTH methods.
+$records = $historian->getChangedRecords(['order_id' => 42], ['status', 'last_change']);
+$fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
+```
+
 **Change record structure:**
 ```php
 [

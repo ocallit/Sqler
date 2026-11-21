@@ -188,6 +188,17 @@ foreach ($changes as $change) {
         echo "  {$field}: '{$diff['before']}' → '{$diff['after']}'\n";
     }
 }
+
+// Every version of the record that changed (oldest first, keyed by history_id)
+$records = $historian->getChangedRecords(['id' => 123]);
+
+// Which history rows added, modified or deleted each field:
+// ['email' => ['added' => [1], 'modified' => [5, 9], 'deleted' => []], ...]
+$fields = $historian->getFieldChanges($records);
+
+// Restrict to some fields (they count even if they are in the ignored fields)
+$records = $historian->getChangedRecords(['id' => 123], ['email']);
+$fields  = $historian->getFieldChanges($records, ['email']);
 ```
 
 ## Advanced Features

@@ -27,6 +27,8 @@ use function is_array;
  *   - getChanges($pk, $offset=0, $limit=100): array of {history_id, action, date, user_nick, diff, record}
  *   - getNLastChanges($pk, $n=7): last N changes
  *   - getLastChange($pk): last 2 changes
+ *   - getChangedRecords($pk, $onlyFields=[]): full rows that changed, keyed by history_id, oldest first
+ *   - getFieldChanges($changedRecords, $onlyFields=[]): fieldName => [added=>[ids], modified=>[ids], deleted=>[ids]]
  *   - changesAsHTML($changes): string
  *
  * Auto-ignored fields: ultimo_cambio, ultimo_cambio_por, last_changed, last_changed_by, last_change, last_change_by

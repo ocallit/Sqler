@@ -355,6 +355,28 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 **Returns**: Last 2 changes for a record
 **Purpose**: Get most recent changes
 
+#### `getChangedRecords(array $primaryKeyValues, array $onlyFields = []): array`
+**Returns**: Full history rows that changed, keyed by `history_id`, sorted by date (oldest first)
+**Shape**: `[history_id => ['history_id', 'action', 'motive', 'date', 'user_nick', 'record' => decoded full row]]`
+**Purpose**: Timeline of the versions of a record. A row is kept only if it differs from the previous kept row (the first is compared against an empty record), so unchanged rows and rows differing only in ignored fields are skipped. Returned `record` always holds all fields.
+**`$onlyFields`**: only changes to these fields count. They win over ignored fields (an ignored field listed here is compared). Other ignored fields stay ignored. Empty = all non-ignored fields.
+**Not paginated**: reads the whole history of the record, oldest first (unlike `getChanges`, which is newest first with a limit).
+
+#### `getFieldChanges(array $changedRecords, array $onlyFields = []): array`
+**Input**: the result of `getChangedRecords()`. Pass the same `$onlyFields` to both methods, otherwise other fields are reported too.
+**Returns**: `fieldName => ['added' => [history_id...], 'modified' => [...], 'deleted' => [...]]`, ids in the order of the given records (date sorted)
+**Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change (strict comparison, so `1` → `'1'` is modified; `''` is a value). A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
+
+```php
+$records = $historian->getChangedRecords(['id' => 42]);                 // all versions that changed
+$fields  = $historian->getFieldChanges($records);
+// ['price' => ['added' => [10], 'modified' => [14, 19], 'deleted' => []], ...]
+
+// only the history of one column (even if it is in the ignored fields)
+$records = $historian->getChangedRecords(['id' => 42], ['price']);
+$fields  = $historian->getFieldChanges($records, ['price']);
+```
+
 #### `changesAsHTML(array $changes): string`
 **Returns**: HTML table representation of changes
 **Purpose**: Format change history for display
