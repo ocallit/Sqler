@@ -27,8 +27,12 @@ use function is_array;
  *   - getChanges($pk, $offset=0, $limit=100): array of {history_id, action, date, user_nick, diff, record}
  *   - getNLastChanges($pk, $n=7): last N changes
  *   - getLastChange($pk): last 2 changes
+ *   - getChangedRecords($pk, $onlyFields=[]): full rows that changed, keyed by history_id, oldest first
+ *   - getFieldChanges($changedRecords, $onlyFields=[]): fieldName => [added=>[ids], modified=>[ids], deleted=>[ids]]
  *   - changesAsHTML($changes): string
  *
+ * Values: SQL returns strings (numbers, dates, datetimes, times) and they must stay strings: register() stores values
+ *   as given, nothing is converted when reading; JSON_BIGINT_AS_STRING is the only number flag json_decode offers.
  * Auto-ignored fields: ultimo_cambio, ultimo_cambio_por, last_changed, last_changed_by, last_change, last_change_by
  * Creates {table}_hist automatically on first write.
  */
@@ -145,6 +149,81 @@ class Historian {
         return $this->diff($history);
     }
 
+    /**
+     * Full history rows of a record that did change, oldest first, ignoring $ignoreDifferenceForFields.
+     * HARD REQUIREMENT: the first (oldest) row is always returned, even if it has no values or none of $onlyFields,
+     * it is the initial base every later row is compared against. Never filter it out.
+     * Later rows are included only if they differ from the previous included row.
+     *
+     * @param array $primaryKeyValues
+     * @param string[] $onlyFields only changes to these fields count (even if ignored), empty: all non ignored fields
+     * @return array<int, array{
+     *      history_id: int,
+     *      action: string,
+     *      motive: string,
+     *      date: string,
+     *      user_nick: string,
+     *      record: array<string, string|array>
+     *   }> keyed by history_id, sorted by date
+     * @throws Exception
+     */
+    public function getChangedRecords(array $primaryKeyValues, array $onlyFields = []): array {
+        $method = __METHOD__;
+        $sql = "SELECT /*$method*/ history_id, `action`, `date`, `user_nick`, `record`, `motive`
+            FROM $this->tableHistory
+            WHERE `pk` = ?
+            ORDER BY `date`, history_id";
+
+        $changed = [];
+        $previous = [];
+        foreach($this->sqlExecutor->arrayKeyed($sql, 'history_id', [$this->primaryKeyEncode($primaryKeyValues)]) as $historyId => $row) {
+            $record = json_decode(
+                json: $row['record'],
+                associative: true,
+                flags: JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING
+            );
+            if(!is_array($record))
+                throw new \UnexpectedValueException('History record must decode to an array.');
+            $row['record'] = $this->normalizeRecordText($record);
+
+            if(!empty($changed) && empty($this->differFields($previous, $row['record'], $onlyFields)))
+                continue;
+            $previous = $row['record'];
+            $changed[$historyId] = $row;
+        }
+        return $changed;
+    }
+
+    /**
+     * Which history rows added, modified or deleted each field.
+     * added: field went from missing/null to a value; deleted: from a value to missing/null; modified: any other change.
+     *
+     * @param array $changedRecords result of getChangedRecords()
+     * @param string[] $onlyFields only report these fields, empty: all fields
+     * @return array<string, array{added: int[], modified: int[], deleted: int[]}> fieldName => history_ids, date sorted
+     */
+    public function getFieldChanges(array $changedRecords, array $onlyFields = []): array {
+        $fieldChanges = [];
+        $previous = [];
+        foreach($changedRecords as $historyId => $row) {
+            foreach($this->differFields($previous, $row['record'], $onlyFields) as $field => $diffData) {
+                if(!array_key_exists($field, $fieldChanges))
+                    $fieldChanges[$field] = ['added' => [], 'modified' => [], 'deleted' => []];
+                if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData))
+                    $kind = 'modified'; // nested record
+                elseif($diffData['before'] === null)
+                    $kind = 'added';
+                elseif($diffData['after'] === null)
+                    $kind = 'deleted';
+                else
+                    $kind = 'modified';
+                $fieldChanges[$field][$kind][] = $historyId;
+            }
+            $previous = $row['record'];
+        }
+        return $fieldChanges;
+    }
+
     /** Normalize decoded string values to NFC, including values in nested records. */
     protected function normalizeRecordText(array $record): array {
         foreach($record as $key => $value) {
@@ -238,24 +317,34 @@ class Historian {
         return implode("\t" ,$pkValues);
     }
 
-    protected function differ(array $before, array $after):array {
+    /** Loose comparison (!=) on purpose: '1.10' == '1.1', 1 == '1' are not differences. But null or bool versus any other type (0, '', false, true) is. */
+    protected function differ(array $before, array $after, ?array $ignoreFields = null):array {
+        $ignoreFields ??= $this->ignoreDifferenceForFields;
         $diff = [];
         $keysToCheck = array_diff(
           array_merge(array_keys($before), array_keys($after)),
-    $this->ignoreDifferenceForFields
+    $ignoreFields
         );
         foreach($keysToCheck as $key) {
             $beforeValue = $before[$key] ?? null;
             $afterValue = $after[$key] ?? null;
             if(is_array($beforeValue) && is_array($afterValue)) {
-                $nested = $this->differ($beforeValue, $afterValue);
+                $nested = $this->differ($beforeValue, $afterValue, $ignoreFields);
                 if(!empty($nested))
                     $diff[$key] = $nested;
             }
-            elseif($beforeValue !== $afterValue)
+            elseif(($beforeValue === null) !== ($afterValue === null) || is_bool($beforeValue) !== is_bool($afterValue) || $beforeValue != $afterValue)
                 $diff[$key] = ['before' => $beforeValue, 'after' => $afterValue];
         }
         return $diff;
+    }
+
+    /** differ() restricted to $onlyFields, which win over ignored fields; empty $onlyFields: all non ignored fields */
+    protected function differFields(array $before, array $after, array $onlyFields = []): array {
+        if(empty($onlyFields))
+            return $this->differ($before, $after);
+        $diff = $this->differ($before, $after, array_diff($this->ignoreDifferenceForFields, $onlyFields));
+        return array_intersect_key($diff, array_flip($onlyFields));
     }
 
     protected function diff(array $recordHistory): array {

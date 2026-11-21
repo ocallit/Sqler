@@ -222,6 +222,28 @@ $recent = $historian->getNLastChanges(['order_id' => 42], 5);
 echo $historian->changesAsHTML($changes);
 ```
 
+### Versions of a record and who touched each field
+
+```php
+// Full rows that changed, keyed by history_id, oldest first (not paginated).
+// Rows that differ only in ignored fields are skipped; 'record' keeps every field.
+$records = $historian->getChangedRecords(['order_id' => 42]);
+
+// fieldName => ['added' => [ids], 'modified' => [ids], 'deleted' => [ids]]  (ids date sorted)
+$fields = $historian->getFieldChanges($records);
+// added = missing/null → value, deleted = value → missing/null, modified = anything else
+// nested array changes are reported on the top-level field as 'modified'
+
+// Only some fields: rows where none of them changed are dropped.
+// $onlyFields wins over ignored fields, and must be passed to BOTH methods.
+$records = $historian->getChangedRecords(['order_id' => 42], ['status', 'last_change']);
+$fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
+```
+
+**Values stay strings:** register the row exactly as SQL returned it (numbers, dates, datetimes and times are
+strings) and Historian never converts anything: `register()` stores values as given and reading keeps them as
+stored. Comparison is LOOSE (`!=`): `'1.10'` = `'1.1'`, `1` = `'1'`; but null versus `0`, `''` or `false` IS a change, and so is bool versus non-bool (`0` vs `false`, `''` vs `false`). Don't cast values to int/float before registering.
+
 **Change record structure:**
 ```php
 [
