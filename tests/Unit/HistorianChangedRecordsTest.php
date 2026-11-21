@@ -279,10 +279,11 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame('delete', $changed[4]['action']);
     }
 
-    public function testComparisonIsStrictTypeWise(): void {
+    public function testComparisonIsLoose(): void {
+        // 1, '1', 1.0 and true are equal (==), '' is not equal to true
         $this->givenRecords([1 => ['v' => 1], 2 => ['v' => '1'], 3 => ['v' => 1.0], 4 => ['v' => true], 5 => ['v' => '']]);
 
-        self::assertSame([1, 2, 3, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1, 5], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
     public function testMissingKeyAndNullAreTheSame(): void {
@@ -549,7 +550,8 @@ class HistorianChangedRecordsTest extends TestCase {
 
         $fields = $this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK));
 
-        self::assertSame(['name', 'qty', 'flag', 'text'], array_keys($fields), 'null valued field is not a change');
+        // loose comparison: against the missing (null) base, 0, false and '' are equal to null so they are not a change
+        self::assertSame(['name'], array_keys($fields));
         foreach($fields as $field)
             self::assertSame(['added' => [4], 'modified' => [], 'deleted' => []], $field);
     }
@@ -665,14 +667,9 @@ class HistorianChangedRecordsTest extends TestCase {
           'value to null' => ['x', null, 'deleted'],
           'string to string' => ['x', 'y', 'modified'],
           'int to int' => [1, 2, 'modified'],
-          'zero to null' => [0, null, 'deleted'],
-          'null to zero' => [null, 0, 'added'],
           'empty string to value' => ['', 'x', 'modified'],
           'value to empty string' => ['x', '', 'modified'],
-          'false to null' => [false, null, 'deleted'],
-          'null to false' => [null, false, 'added'],
           'false to true' => [false, true, 'modified'],
-          'int to string' => [1, '1', 'modified'],
           'null to array' => [null, ['a' => 1], 'added'],
           'array to null' => [['a' => 1], null, 'deleted'],
           'array to other array' => [['a' => 1], ['a' => 2], 'modified'],
@@ -721,22 +718,53 @@ class HistorianChangedRecordsTest extends TestCase {
         ];
     }
 
-    public function testStringsAreComparedAsTextNeverAsNumbers(): void {
+    public function testNumericStringsAreComparedAsNumbersAndOtherStringsAsText(): void {
         $this->givenRecords([
           1 => ['p' => '1.10', 'd' => '2026-09-07', 't' => '10:30:00'],
-          2 => ['p' => '1.10', 'd' => '2026-09-07', 't' => '10:30:00'],   // same text: no change
-          3 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00'],    // 1.10 vs 1.1: different text
-          4 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00.000000'], // different text
-          5 => ['p' => '01.1', 'd' => '2026-09-07', 't' => '10:30:00.000000'],
+          2 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00'],        // 1.10 == 1.1: no change
+          3 => ['p' => '01.1', 'd' => '2026-09-07', 't' => '10:30:00'],       // no change
+          4 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00.000000'], // time text differs: change
+          5 => ['p' => '1.1', 'd' => '2026-09-08', 't' => '10:30:00.000000'], // date differs: change
         ]);
 
-        self::assertSame([1, 3, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
-    public function testNumericStringIsNotEqualToTheNumber(): void {
-        $this->givenRecords([1 => ['v' => '1'], 2 => ['v' => 1], 3 => ['v' => '1']]);
+    public function testNumericStringEqualsTheNumber(): void {
+        $this->givenRecords([1 => ['v' => '1'], 2 => ['v' => 1], 3 => ['v' => 1.0]]);
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
 
-        self::assertSame([1, 2, 3], array_keys($this->historian->getChangedRecords(self::PK)));
+    public function testHugeIntegerStringsAreStillComparedAsText(): void {
+        // PHP compares two overflowing integer strings as strings
+        $this->givenRecords([1 => ['v' => '12345678901234567890123'], 2 => ['v' => '12345678901234567890124']]);
+
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testDecimalStringsBeyondFloatPrecisionAreEqual(): void {
+        // known limit of ==: decimals are compared as floats
+        $this->givenRecords([1 => ['v' => '0.10000000000000000001'], 2 => ['v' => '0.10000000000000000002']]);
+
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    #[DataProvider('looselyEqualProvider')]
+    public function testLooselyEqualValuesAreNotAChange(mixed $before, mixed $after): void {
+        $this->givenRecords([1 => ['filler' => 1, 'v' => $before], 2 => ['filler' => 1, 'v' => $after]]);
+
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public static function looselyEqualProvider(): array {
+        return [
+          'zero and null' => [0, null], 'null and zero' => [null, 0],
+          'false and null' => [false, null], 'null and false' => [null, false],
+          'empty string and null' => ['', null], 'null and empty string' => [null, ''],
+          'zero and false' => [0, false], 'int and numeric string' => [1, '1'],
+          'decimal strings' => ['1.10', '1.1'], 'exponent string' => ['1e3', '1000'],
+          'leading zeros' => ['007', '7'],
+        ];
     }
 
     public function testBigIntegerNumbersInJsonAreDecodedAsStrings(): void {

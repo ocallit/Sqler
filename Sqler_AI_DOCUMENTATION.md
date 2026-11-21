@@ -341,7 +341,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 - **UPDATE**: After updating, SELECT the complete updated record and register the new state
 - **DELETE**: Before deleting, SELECT the complete record and register the final state before deletion
   **Auto-creates history table**: If `{table}_hist` doesn't exist, it creates it automatically
-  **Values stay strings**: SQL returns numbers, dates, datetimes and times as strings and Historian keeps them as such: `register()` stores values as given and nothing is converted on read (`'1.10'` ≠ `'1.1'`, `'1'` ≠ `1`). Pass fresh `SELECT *` rows. Only a numeric JSON token (a number the caller registered as number) is decoded by `json_decode` as a number, big integers as strings (`JSON_BIGINT_AS_STRING`).
+  **Values stay strings**: SQL returns numbers, dates, datetimes and times as strings and Historian keeps them as such: `register()` stores values as given and nothing is converted on read (comparison is loose, see `getFieldChanges`). Pass fresh `SELECT *` rows. Only a numeric JSON token (a number the caller registered as number) is decoded by `json_decode` as a number, big integers as strings (`JSON_BIGINT_AS_STRING`).
 
 #### `getChanges(array $primaryKeyValues, int|string $offset = 0, int|string $rows = 100): array`
 **Returns**: Array of change records with diff analysis
@@ -366,7 +366,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 #### `getFieldChanges(array $changedRecords, array $onlyFields = []): array`
 **Input**: the result of `getChangedRecords()`. Pass the same `$onlyFields` to both methods, otherwise other fields are reported too.
 **Returns**: `fieldName => ['added' => [history_id...], 'modified' => [...], 'deleted' => [...]]`, ids in the order of the given records (date sorted)
-**Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change (strict comparison, so `1` → `'1'` is modified; `''` is a value). A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
+**Rules**: `added` = missing/null → value, `deleted` = value → missing/null, `modified` = any other change. Comparison is LOOSE (`!=`, not strict): `'1.10'` = `'1.1'`, `'007'` = `'7'`, `1` = `'1'`, and null = `0` = `false` = `''`, so e.g. `0` → null is not a change at all (and a first value of `0`/`''`/`false` is not reported as added). Decimals beyond float precision compare equal; two huge integer strings are still compared as text. A nested array change is reported once on its top-level field as `modified`. Only fields that changed appear; no database access.
 
 ```php
 $records = $historian->getChangedRecords(['id' => 42]);                 // all versions that changed
