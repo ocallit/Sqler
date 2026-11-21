@@ -279,11 +279,10 @@ class HistorianChangedRecordsTest extends TestCase {
         self::assertSame('delete', $changed[4]['action']);
     }
 
-    public function testNonNumericTypesAreStillComparedStrictly(): void {
-        // 1, '1' and 1.0 are all the string '1'; true and '' are different values
+    public function testComparisonIsStrictTypeWise(): void {
         $this->givenRecords([1 => ['v' => 1], 2 => ['v' => '1'], 3 => ['v' => 1.0], 4 => ['v' => true], 5 => ['v' => '']]);
 
-        self::assertSame([1, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1, 2, 3, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
     public function testMissingKeyAndNullAreTheSame(): void {
@@ -434,7 +433,7 @@ class HistorianChangedRecordsTest extends TestCase {
 
         $changed = $this->historian->getChangedRecords(self::PK, ['price']);
 
-        self::assertSame(['name' => 'B', 'price' => '2'], $changed[2]['record']);
+        self::assertSame(['name' => 'B', 'price' => 2], $changed[2]['record']);
     }
 
     public function testOnlyFieldsIsComparedAgainstThePreviousKeptRow(): void {
@@ -673,6 +672,7 @@ class HistorianChangedRecordsTest extends TestCase {
           'false to null' => [false, null, 'deleted'],
           'null to false' => [null, false, 'added'],
           'false to true' => [false, true, 'modified'],
+          'int to string' => [1, '1', 'modified'],
           'null to array' => [null, ['a' => 1], 'added'],
           'array to null' => [['a' => 1], null, 'deleted'],
           'array to other array' => [['a' => 1], ['a' => 2], 'modified'],
@@ -681,76 +681,18 @@ class HistorianChangedRecordsTest extends TestCase {
         ];
     }
 
-    // ------------------------------------------------------------------ numbers and dates are always strings
+    // ------------------------------------------------------------------ values read from sql are strings and stay strings
 
-    public function testNumbersInReturnedRecordsAreStrings(): void {
-        $this->givenHistory([1 => self::row(1, '{"i":5,"f":1.5,"neg":-3,"zero":0,"big":12345678901234567890123,"nested":{"n":7,"list":[1,2.5]},"s":"x","b":true,"null":null}')]);
-
-        $record = $this->historian->getChangedRecords(self::PK)[1]['record'];
-
-        self::assertSame(
-          ['i' => '5', 'f' => '1.5', 'neg' => '-3', 'zero' => '0', 'big' => '12345678901234567890123',
-           'nested' => ['n' => '7', 'list' => ['1', '2.5']], 's' => 'x', 'b' => true, 'null' => null],
-          $record
-        );
-    }
-
-    #[DataProvider('sameNumberProvider')]
-    public function testSameNumberInAnyJsonFormIsNotAChange(string $first, string $second): void {
-        $this->givenHistory([1 => self::row(1, '{"v":' . $first . '}'), 2 => self::row(2, '{"v":' . $second . '}')]);
-
-        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
-    }
-
-    public static function sameNumberProvider(): array {
-        return [
-          'int and string' => ['1', '"1"'],
-          'int and float' => ['1', '1.0'],
-          'float and string' => ['1.5', '"1.5"'],
-          'float float noise' => ['0.30000000000000004', '0.3'],
-          'float noise 2' => ['0.1', '0.10000000000000001'],
-          'exponent form' => ['1e2', '100'],
-          'negative zero point' => ['-2.50', '-2.5'],
+    public function testStringValuesStayStringsExactlyAsStored(): void {
+        $values = [
+          'int' => '5', 'decimal' => '1.10', 'leading_zero' => '007', 'exp' => '1e3', 'plus' => '+5', 'hex' => '0x1A',
+          'spaces' => ' 3 ', 'negative' => '-0.50', 'zero' => '0', 'empty' => '',
+          'big' => '12345678901234567890123', 'float_noise' => '0.30000000000000004',
+          'nested' => ['n' => '7', 'list' => ['1', '2.50']],
         ];
-    }
+        $this->givenHistory([1 => self::row(1, $values)]);
 
-    #[DataProvider('differentNumberProvider')]
-    public function testDifferentNumbersAreAChange(string $first, string $second): void {
-        $this->givenHistory([1 => self::row(1, '{"v":' . $first . '}'), 2 => self::row(2, '{"v":' . $second . '}')]);
-
-        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK)));
-    }
-
-    public static function differentNumberProvider(): array {
-        return [
-          'ints' => ['1', '2'],
-          'int and string' => ['1', '"2"'],
-          'decimal strings differing in text' => ['"1.10"', '"1.1"'],
-          'leading zero string' => ['"007"', '"7"'],
-          'zero and empty string' => ['0', '""'],
-          'zero and null' => ['0', 'null'],
-          'big integer strings' => ['12345678901234567890123', '12345678901234567890124'],
-          'sign' => ['1', '-1'],
-        ];
-    }
-
-    public function testNumbersInNestedArraysAreComparedAsStrings(): void {
-        $this->givenRecords([
-          1 => ['items' => [['qty' => 1, 'price' => 0.1]]],
-          2 => ['items' => [['qty' => '1', 'price' => '0.1']]],
-          3 => ['items' => [['qty' => 1.0, 'price' => 0.30000000000000004]]],
-        ]);
-
-        self::assertSame([1, 3], array_keys($this->historian->getChangedRecords(self::PK)));
-    }
-
-    public function testNumericStringsKeepTheirExactTextInRecords(): void {
-        $this->givenHistory([1 => self::row(1, '{"a":"1.10","b":"007","c":"1e3","d":"+5","e":"0x1A","f":" 3 "}')]);
-
-        self::assertSame(
-          ['a' => '1.10', 'b' => '007', 'c' => '1e3', 'd' => '+5', 'e' => '0x1A', 'f' => ' 3 '],
-          $this->historian->getChangedRecords(self::PK)[1]['record']
-        );
+        self::assertSame($values, $this->historian->getChangedRecords(self::PK)[1]['record']);
     }
 
     #[DataProvider('dateTimeProvider')]
@@ -779,39 +721,41 @@ class HistorianChangedRecordsTest extends TestCase {
         ];
     }
 
-    public function testDateValuesAreComparedAsTextNotAsNumbers(): void {
+    public function testStringsAreComparedAsTextNeverAsNumbers(): void {
         $this->givenRecords([
-          1 => ['d' => '2026-09-07', 't' => '10:30:00'],
-          2 => ['d' => '2026-09-07', 't' => '10:30:00'],
-          3 => ['d' => '2026-09-07', 't' => '10:30:00.000000'],
+          1 => ['p' => '1.10', 'd' => '2026-09-07', 't' => '10:30:00'],
+          2 => ['p' => '1.10', 'd' => '2026-09-07', 't' => '10:30:00'],   // same text: no change
+          3 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00'],    // 1.10 vs 1.1: different text
+          4 => ['p' => '1.1', 'd' => '2026-09-07', 't' => '10:30:00.000000'], // different text
+          5 => ['p' => '01.1', 'd' => '2026-09-07', 't' => '10:30:00.000000'],
         ]);
 
-        self::assertSame([1, 3], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1, 3, 4, 5], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
-    public function testFieldChangesCompareNumbersAsStrings(): void {
-        $this->givenRecords([
-          1 => ['price' => 0.1, 'qty' => 1],
-          2 => ['price' => '0.1', 'qty' => '1'],
-          3 => ['price' => 0.30000000000000004, 'qty' => '2'],
-          4 => ['price' => '0.3', 'qty' => 2],
-        ]);
+    public function testNumericStringIsNotEqualToTheNumber(): void {
+        $this->givenRecords([1 => ['v' => '1'], 2 => ['v' => 1], 3 => ['v' => '1']]);
 
-        $fields = $this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK));
-
-        self::assertSame(['added' => [1], 'modified' => [3], 'deleted' => []], $fields['price']);
-        self::assertSame(['added' => [1], 'modified' => [3], 'deleted' => []], $fields['qty']);
+        self::assertSame([1, 2, 3], array_keys($this->historian->getChangedRecords(self::PK)));
     }
 
-    public function testNumberToNullAndNullToNumberAreStillDeletedAndAdded(): void {
-        $this->givenRecords([1 => ['v' => 0], 2 => ['v' => null], 3 => ['v' => 0.0]]);
+    public function testBigIntegerNumbersInJsonAreDecodedAsStrings(): void {
+        $this->givenHistory([1 => self::row(1, '{"big":12345678901234567890123}')]);
 
-        $fields = $this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK));
-
-        self::assertSame(['added' => [1, 3], 'modified' => [], 'deleted' => [2]], $fields['v']);
+        self::assertSame('12345678901234567890123', $this->historian->getChangedRecords(self::PK)[1]['record']['big']);
     }
 
-    public function testRegisterStoresNumbersAsStrings(): void {
+    public function testNumbersAlreadyInTheJsonAreNotConvertedByHistorian(): void {
+        // register() stores what it is given; a JSON number is decoded by json_decode as is
+        $this->givenHistory([1 => self::row(1, '{"i":5,"f":1.5}')]);
+
+        $record = $this->historian->getChangedRecords(self::PK)[1]['record'];
+
+        self::assertSame(5, $record['i']);
+        self::assertSame(1.5, $record['f']);
+    }
+
+    public function testRegisterStoresValuesAsGiven(): void {
         $this->useMockSqlExecutor();
         $captured = [];
         $this->mockSqlExecutor->expects(self::once())->method('query')
@@ -820,35 +764,19 @@ class HistorianChangedRecordsTest extends TestCase {
               return true;
           });
 
-        $this->historian->register('insert', self::PK, [
-          'test_table_id' => 1, 'price' => 0.1 + 0.2, 'qty' => 3, 'neg' => -1.5, 'date' => '2026-09-07',
-          'time' => '10:30:00', 'nested' => ['n' => 2, 'f' => 2.5], 'name' => 'x', 'none' => null, 'flag' => true,
+        $this->historian->register('insert', ['test_table_id' => '1'], [
+          'test_table_id' => '1', 'price' => '0.30', 'qty' => 3, 'date' => '2026-09-07', 'time' => '10:30:00',
+          'nested' => ['n' => '2', 'm' => 2], 'none' => null,
         ], 'tester');
 
         $json = null;
         foreach($captured as $param)
             if(is_string($param) && str_starts_with($param, '{'))
                 $json = $param;
-        self::assertNotNull($json, 'record json not passed to the insert');
         self::assertSame(
-          '{"test_table_id":"1","price":"0.3","qty":"3","neg":"-1.5","date":"2026-09-07","time":"10:30:00",'
-          . '"nested":{"n":"2","f":"2.5"},"name":"x","none":null,"flag":true}',
+          '{"test_table_id":"1","price":"0.30","qty":3,"date":"2026-09-07","time":"10:30:00","nested":{"n":"2","m":2},"none":null}',
           $json
         );
-    }
-
-    public function testGetChangesAlsoComparesNumbersAsStrings(): void {
-        $metadata = ['action' => 'update', 'motive' => '', 'date' => '2026-09-07 10:00:00', 'user_nick' => 'tester'];
-        $this->mockSqlExecutor->method('arrayKeyed')->willReturn([
-          3 => $metadata + ['history_id' => 3, 'record' => '{"v":0.30000000000000004,"w":1}'],
-          2 => $metadata + ['history_id' => 2, 'record' => '{"v":"0.3","w":"1"}'],
-          1 => $metadata + ['history_id' => 1, 'record' => '{"v":"0.3","w":"2"}'],
-        ]);
-
-        $changes = $this->historian->getChanges(self::PK);
-
-        self::assertSame([2], array_column($changes, 'history_id'));
-        self::assertSame(['w' => ['before' => '2', 'after' => '1']], $changes[0]['diff']);
     }
 
     public function testNestedChangesAreReportedOnTheTopLevelField(): void {

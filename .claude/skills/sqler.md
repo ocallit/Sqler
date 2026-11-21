@@ -240,9 +240,9 @@ $records = $historian->getChangedRecords(['order_id' => 42], ['status', 'last_ch
 $fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
 ```
 
-**Values are strings:** numbers are ALWAYS stored/compared as strings (floats rounded to 14 digits) so float
-errors give no false changes (`1` = `'1'` = `1.0`); dates, datetimes and times stay strings. Records and diffs
-return numbers as strings.
+**Values stay strings:** register the row exactly as SQL returned it (numbers, dates, datetimes and times are
+strings) and Historian never converts anything: `register()` stores values as given and reading keeps them as
+stored (`'1.10'` ≠ `'1.1'`). Don't cast values to int/float before registering.
 
 **Change record structure:**
 ```php
