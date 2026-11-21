@@ -562,6 +562,8 @@ class Historian {
 
     /** Executor of formatDecision(): the value as it shows, as it is when nothing applies */
     protected function formatted(string $field, mixed $value, array $format = []): mixed {
+        if(!is_scalar($value))
+            return $value; // null and arrays (a whole child collection) are shown as they are
         $decision = $this->formatDecision($field, $value, $format);
         $text = trim((string)$value);
         switch($decision['code']) {

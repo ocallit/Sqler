@@ -234,6 +234,21 @@ class HistorianFormatTest extends TestCase {
         self::assertSame(['1.00', '2.00'], $this->cells('qty', '1', '2', [], $historian));
     }
 
+    public function testFormattedLeavesNullAndArraysAsTheyAreWithoutWarnings(): void {
+        $historian = new class($this->createStub(SqlExecutor::class), 'test_table') extends Historian {
+            public function show(string $field, mixed $value, array $format = []): mixed {
+                return $this->formatted($field, $value, $format);
+            }
+        };
+        $lines = ['10' => ['numero' => '12345', 'amount' => '1000']];
+
+        self::assertSame($lines, $historian->show('items', $lines));
+        self::assertSame($lines, $historian->show('items', $lines, ['format' => '#,##0.00']));
+        self::assertSame([], $historian->show('items', []));
+        self::assertNull($historian->show('amount', null));
+        self::assertSame('1,000.00', $historian->show('amount', '1000'));
+    }
+
     // ------------------------------------------------------------------ child lines
 
     public function testChildLineFieldsAreFormatted(): void {
