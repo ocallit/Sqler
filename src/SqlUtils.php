@@ -67,7 +67,8 @@ class SqlUtils {
      * @return string
      */
     public static function toLabel(string $fieldName): string {
-        return ucwords(strtolower(str_replace('_', ' ', $fieldName)));
+        $snake = mb_strtolower(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $fieldName));
+        return ucwords(str_replace('_', ' ', $snake));
     }
 
     /**
