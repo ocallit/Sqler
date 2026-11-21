@@ -150,6 +150,7 @@ class Historian {
      * The first row is always included (it creates every field), later rows only if they differ from the previous one.
      *
      * @param array $primaryKeyValues
+     * @param string[] $onlyFields only changes to these fields count, empty: all fields
      * @return array<int, array{
      *      history_id: int,
      *      action: string,
@@ -160,7 +161,7 @@ class Historian {
      *   }> keyed by history_id, sorted by date
      * @throws Exception
      */
-    public function getChangedRecords(array $primaryKeyValues): array {
+    public function getChangedRecords(array $primaryKeyValues, array $onlyFields = []): array {
         $method = __METHOD__;
         $sql = "SELECT /*$method*/ history_id, `action`, `date`, `user_nick`, `record`, `motive`
             FROM $this->tableHistory
@@ -179,7 +180,7 @@ class Historian {
                 throw new \UnexpectedValueException('History record must decode to an array.');
             $row['record'] = $this->normalizeRecordText($record);
 
-            if(!empty($changed) && empty($this->differ($previous, $row['record'])))
+            if(!empty($changed) && empty($this->differFields($previous, $row['record'], $onlyFields)))
                 continue;
             $previous = $row['record'];
             $changed[$historyId] = $row;
@@ -192,13 +193,14 @@ class Historian {
      * added: field went from missing/null to a value; deleted: from a value to missing/null; modified: any other change.
      *
      * @param array $changedRecords result of getChangedRecords()
+     * @param string[] $onlyFields only report these fields, empty: all fields
      * @return array<string, array{added: int[], modified: int[], deleted: int[]}> fieldName => history_ids, date sorted
      */
-    public function getFieldChanges(array $changedRecords): array {
+    public function getFieldChanges(array $changedRecords, array $onlyFields = []): array {
         $fieldChanges = [];
         $previous = [];
         foreach($changedRecords as $historyId => $row) {
-            foreach($this->differ($previous, $row['record']) as $field => $diffData) {
+            foreach($this->differFields($previous, $row['record'], $onlyFields) as $field => $diffData) {
                 if(!array_key_exists($field, $fieldChanges))
                     $fieldChanges[$field] = ['added' => [], 'modified' => [], 'deleted' => []];
                 if(!array_key_exists('before', $diffData) || !array_key_exists('after', $diffData))
@@ -327,6 +329,12 @@ class Historian {
                 $diff[$key] = ['before' => $beforeValue, 'after' => $afterValue];
         }
         return $diff;
+    }
+
+    /** differ() restricted to $onlyFields, empty $onlyFields: all fields */
+    protected function differFields(array $before, array $after, array $onlyFields = []): array {
+        $diff = $this->differ($before, $after);
+        return empty($onlyFields) ? $diff : array_intersect_key($diff, array_flip($onlyFields));
     }
 
     protected function diff(array $recordHistory): array {
