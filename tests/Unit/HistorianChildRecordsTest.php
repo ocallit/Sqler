@@ -226,6 +226,77 @@ class HistorianChildRecordsTest extends TestCase {
         self::assertSame(['added' => [1], 'modified' => [], 'deleted' => []], $fields['items.103.price']);
     }
 
+    public function testLinesSwappingPositionWithTheSameKeysIsNotAChange(): void {
+        $first = self::line('1', 'circles', '3.14');
+        $second = self::line('2', 'triangles', '1.00');
+        $this->givenRecords([
+          1 => ['items' => [101 => $first, 102 => $second]],
+          2 => ['items' => [102 => $second, 101 => $first]], // same lines, same pk, swapped order
+        ]);
+
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK)));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['items'])));
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['items.price'])));
+        self::assertSame(
+          ['items' => ['added' => [1], 'modified' => [], 'deleted' => []]],
+          array_intersect_key($this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK)), ['items' => 1])
+        );
+    }
+
+    public function testLinesSwappingPositionAfterJsonRoundTripIsNotAChange(): void {
+        // registered as json, the swapped collection is an object with its keys in another order
+        $json1 = '{"items":{"101":{"quantity":"1"},"102":{"quantity":"2"}}}';
+        $json2 = '{"items":{"102":{"quantity":"2"},"101":{"quantity":"1"}}}';
+        $rows = [1 => self::row(1, []), 2 => self::row(2, [])];
+        $rows[1]['record'] = $json1;
+        $rows[2]['record'] = $json2;
+        $historian = new Historian($stub = $this->createStub(SqlExecutor::class), 'test_table');
+        $stub->method('arrayKeyed')->willReturn($rows);
+
+        self::assertSame([1], array_keys($historian->getChangedRecords(self::PK)));
+    }
+
+    public function testSwappingTheSortFieldOfTheLinesIsAChangeOfThatField(): void {
+        $this->givenRecords([
+          1 => ['items' => [101 => ['product' => 'a', 'line_no' => '1'], 102 => ['product' => 'b', 'line_no' => '2']]],
+          2 => ['items' => [101 => ['product' => 'a', 'line_no' => '2'], 102 => ['product' => 'b', 'line_no' => '1']]],
+        ]);
+        $only = ['items.line_no'];
+
+        $fields = $this->historian->getFieldChanges($this->historian->getChangedRecords(self::PK, $only), $only);
+
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK, $only)));
+        self::assertSame(['added' => [1], 'modified' => [2], 'deleted' => []], $fields['items.line_no']);
+        self::assertSame([1], array_keys($this->historian->getChangedRecords(self::PK, ['items.product'])), 'products did not change');
+    }
+
+    public function testLinesSwappingPositionInAPositionalListAreBothModified(): void {
+        // why lines must be keyed by their pk: without keys a swap changes both lines
+        $first = self::line('1', 'circles', '3.14');
+        $second = self::line('2', 'triangles', '1.00');
+        $this->givenRecords([
+          1 => ['items' => [$first, $second]],
+          2 => ['items' => [$second, $first]],
+        ]);
+
+        self::assertSame([1, 2], array_keys($this->historian->getChangedRecords(self::PK)));
+    }
+
+    public function testSwappedLinesPrintNoHtmlRow(): void {
+        $first = self::line('1', 'circles', '3.14');
+        $second = self::line('2', 'triangles', '1.00');
+        $changes = $this->givenChanges([
+          1 => ['total' => '10', 'items' => [101 => $first, 102 => $second]],
+          2 => ['total' => '20', 'items' => [102 => $second, 101 => $first]],
+        ]);
+
+        $html = $this->historian->changesAsHTML($changes, self::ITEMS_FORMAT);
+
+        self::assertStringContainsString('<td>Total<td>10<td>20', $html);
+        self::assertStringNotContainsString('<tr class="lines">', $html);
+        self::assertStringNotContainsString('circles', $html);
+    }
+
     // ------------------------------------------------------------------ $onlyFields paths and ignored fields
 
     public function testPathUnignoresTheFieldAtThatPathOnly(): void {
