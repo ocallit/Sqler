@@ -29,17 +29,17 @@ class SqlUtilsTest extends TestCase {
           'leading_underscore' => ['_name', ' Name'],
           'trailing_underscore' => ['name_', 'Name '],
           'multiple_consecutive_underscores' => ['user__name', 'User  Name'],
-            // only '_' is a word separator: '-' and '.' are not, so what follows stays lowercase
-          'hyphen_is_not_a_separator' => ['user-name', 'User-name'],
+            // '_' and '-' start a new word (title case), '.' does not: what follows it stays lowercase
+          'hyphen_starts_a_new_word' => ['user-name', 'User-Name'],
           'dot_is_not_a_separator' => ['users.user_name', 'Users.user Name'],
             // acronyms are lowercased first, so they come back as plain words
           'acronym_is_not_preserved' => ['ID', 'Id'],
           'acronym_inside_name' => ['user_ID', 'User Id'],
-            // digits are not letters: ucwords does not touch them
+            // digits are not letters and stay as they are; a letter right after a digit is capitalized (MB_CASE_TITLE), a letter after '_' always is
           'digit_in_name' => ['user2_name', 'User2 Name'],
-          'starts_with_digit' => ['2nd_line', '2nd Line'],
-            // strtolower/ucwords are byte oriented: non ascii bytes pass through untouched
-          'non_ascii_bytes_pass_through' => ['ÁREA_NOMBRE', 'Área Nombre'],
+          'starts_with_digit' => ['2nd_line', '2Nd Line'], // title case also capitalizes the letter after a digit
+            // mb_strtolower and MB_CASE_TITLE are multibyte aware: non ascii letters are lowercased and capitalized too
+          'non_ascii_letters_are_capitalized' => ['ÁREA_NOMBRE', 'Área Nombre'],
           'multibyte_first_letter' => ['año_nuevo', 'Año Nuevo'],
           'multibyte_camel_case' => ['áreaNombre', 'Área Nombre'],
           'multibyte_not_at_word_start' => ['pañal', 'Pañal'],
