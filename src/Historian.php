@@ -150,7 +150,7 @@ class Historian {
      * The first row is always included (it creates every field), later rows only if they differ from the previous one.
      *
      * @param array $primaryKeyValues
-     * @param string[] $onlyFields only changes to these fields count, empty: all fields
+     * @param string[] $onlyFields only changes to these fields count (even if ignored), empty: all non ignored fields
      * @return array<int, array{
      *      history_id: int,
      *      action: string,
@@ -311,17 +311,18 @@ class Historian {
         return implode("\t" ,$pkValues);
     }
 
-    protected function differ(array $before, array $after):array {
+    protected function differ(array $before, array $after, ?array $ignoreFields = null):array {
+        $ignoreFields ??= $this->ignoreDifferenceForFields;
         $diff = [];
         $keysToCheck = array_diff(
           array_merge(array_keys($before), array_keys($after)),
-    $this->ignoreDifferenceForFields
+    $ignoreFields
         );
         foreach($keysToCheck as $key) {
             $beforeValue = $before[$key] ?? null;
             $afterValue = $after[$key] ?? null;
             if(is_array($beforeValue) && is_array($afterValue)) {
-                $nested = $this->differ($beforeValue, $afterValue);
+                $nested = $this->differ($beforeValue, $afterValue, $ignoreFields);
                 if(!empty($nested))
                     $diff[$key] = $nested;
             }
@@ -331,10 +332,12 @@ class Historian {
         return $diff;
     }
 
-    /** differ() restricted to $onlyFields, empty $onlyFields: all fields */
+    /** differ() restricted to $onlyFields, which win over ignored fields; empty $onlyFields: all non ignored fields */
     protected function differFields(array $before, array $after, array $onlyFields = []): array {
-        $diff = $this->differ($before, $after);
-        return empty($onlyFields) ? $diff : array_intersect_key($diff, array_flip($onlyFields));
+        if(empty($onlyFields))
+            return $this->differ($before, $after);
+        $diff = $this->differ($before, $after, array_diff($this->ignoreDifferenceForFields, $onlyFields));
+        return array_intersect_key($diff, array_flip($onlyFields));
     }
 
     protected function diff(array $recordHistory): array {
