@@ -147,7 +147,7 @@ class Historian {
 
     /**
      * Full history rows of a record that did change, oldest first, ignoring $ignoreDifferenceForFields.
-     * The first row is always included (it creates every field), later rows only if they differ from the previous one.
+     * A row is included only if it differs from the previous included row (the first one is compared against an empty record).
      *
      * @param array $primaryKeyValues
      * @param string[] $onlyFields only changes to these fields count (even if ignored), empty: all non ignored fields
@@ -180,7 +180,7 @@ class Historian {
                 throw new \UnexpectedValueException('History record must decode to an array.');
             $row['record'] = $this->normalizeRecordText($record);
 
-            if(!empty($changed) && empty($this->differFields($previous, $row['record'], $onlyFields)))
+            if(empty($this->differFields($previous, $row['record'], $onlyFields)))
                 continue;
             $previous = $row['record'];
             $changed[$historyId] = $row;
