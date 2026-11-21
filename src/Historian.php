@@ -31,6 +31,8 @@ use function is_array;
  *   - getFieldChanges($changedRecords, $onlyFields=[]): fieldName => [added=>[ids], modified=>[ids], deleted=>[ids]]
  *   - changesAsHTML($changes): string
  *
+ * Values: numbers are ALWAYS stored and compared as strings (floats rounded to 14 significant digits) so float errors
+ *   never show as changes; date, datetime and time values are strings and stay strings.
  * Auto-ignored fields: ultimo_cambio, ultimo_cambio_por, last_changed, last_changed_by, last_change, last_change_by
  * Creates {table}_hist automatically on first write.
  */
@@ -93,7 +95,7 @@ class Historian {
           'action' => $action,
           'motive' => $motive,
           'pk' => $this->primaryKeyEncode($primaryKeys),
-          'record' => json_encode($values, SqlUtils::JSON_MYSQL_OPTIONS | JSON_THROW_ON_ERROR),
+          'record' => json_encode($this->numbersToStrings($values), SqlUtils::JSON_MYSQL_OPTIONS | JSON_THROW_ON_ERROR),
           'user_nick' => empty($userNick) ? ($_SESSION[self::$SessionNickKey] ?? '?') : $userNick,
           'date' => 'NOW(6)'
         ];
@@ -222,11 +224,32 @@ class Historian {
         return $fieldChanges;
     }
 
-    /** Normalize decoded string values to NFC, including values in nested records. */
+    /** Floats are rounded to 14 significant digits, independent of php.ini precision, to drop float errors. */
+    protected function numberToString(int|float $number): string {
+        return is_int($number) ? (string)$number : sprintf('%.14G', $number);
+    }
+
+    /**
+     * Numbers always become strings so float errors never show up as changes (dates, datetimes and times are strings
+     * already and stay so). Applied to the values before they are stored and to decoded records, including nested ones.
+     */
+    protected function numbersToStrings(array $values): array {
+        foreach($values as $key => $value) {
+            if(is_array($value))
+                $values[$key] = $this->numbersToStrings($value);
+            elseif(is_int($value) || is_float($value))
+                $values[$key] = $this->numberToString($value);
+        }
+        return $values;
+    }
+
+    /** Normalize decoded string values to NFC and numbers to strings, including values in nested records. */
     protected function normalizeRecordText(array $record): array {
         foreach($record as $key => $value) {
             if(is_array($value)) {
                 $record[$key] = $this->normalizeRecordText($value);
+            } elseif(is_int($value) || is_float($value)) {
+                $record[$key] = $this->numberToString($value);
             } elseif(is_string($value)) {
                 $normalized = \Normalizer::normalize($value, \Normalizer::FORM_C);
                 if($normalized === false)

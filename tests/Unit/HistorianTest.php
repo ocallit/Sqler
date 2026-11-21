@@ -55,8 +55,8 @@ class HistorianTest extends TestCase {
         $changes = $this->historian->getChanges(['test_table_id' => 1]);
 
         self::assertSame([3, 2], array_column($changes, 'history_id'));
-        self::assertSame(['before' => 2, 'after' => 3], $changes[0]['diff']['value']);
-        self::assertSame(['before' => 1, 'after' => 2], $changes[1]['diff']['value']);
+        self::assertSame(['before' => '2', 'after' => '3'], $changes[0]['diff']['value']);
+        self::assertSame(['before' => '1', 'after' => '2'], $changes[1]['diff']['value']);
     }
 
     public function testGetChangesFetchesOneExtraRowToCompareTheOldestOne(): void {
@@ -85,8 +85,8 @@ class HistorianTest extends TestCase {
 
         $html = $this->historian->changesAsHTML($this->historian->getChanges(['test_table_id' => 1]));
 
-        self::assertStringContainsString('{"a":1}', $html);
-        self::assertStringContainsString('{"a":2}', $html);
+        self::assertStringContainsString('{"a":"1"}', $html);
+        self::assertStringContainsString('{"a":"2"}', $html);
         self::assertSame(2, substr_count($html, '</table>'));
     }
 

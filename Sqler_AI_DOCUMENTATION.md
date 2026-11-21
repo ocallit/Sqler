@@ -341,6 +341,7 @@ __construct(SqlExecutor $sqlExecutor, string $table, array $primaryKeyFieldNames
 - **UPDATE**: After updating, SELECT the complete updated record and register the new state
 - **DELETE**: Before deleting, SELECT the complete record and register the final state before deletion
   **Auto-creates history table**: If `{table}_hist` doesn't exist, it creates it automatically
+  **Values are strings**: numbers (int/float, nested too) are ALWAYS stored and compared as strings (floats rounded to 14 significant digits), so `0.1+0.2` vs `'0.3'` or `1` vs `'1'` never count as a change; returned records hold numbers as strings. Date, datetime and time values are strings and stay strings. Numeric-looking strings keep their exact text (`'1.10'` ≠ `'1.1'`). Booleans and nulls are kept as they are.
 
 #### `getChanges(array $primaryKeyValues, int|string $offset = 0, int|string $rows = 100): array`
 **Returns**: Array of change records with diff analysis

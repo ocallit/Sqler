@@ -240,6 +240,10 @@ $records = $historian->getChangedRecords(['order_id' => 42], ['status', 'last_ch
 $fields  = $historian->getFieldChanges($records, ['status', 'last_change']);
 ```
 
+**Values are strings:** numbers are ALWAYS stored/compared as strings (floats rounded to 14 digits) so float
+errors give no false changes (`1` = `'1'` = `1.0`); dates, datetimes and times stay strings. Records and diffs
+return numbers as strings.
+
 **Change record structure:**
 ```php
 [
