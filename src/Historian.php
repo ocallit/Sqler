@@ -74,6 +74,11 @@ class Historian {
     /** @var string[] child collections (fields that hold lines keyed by the line's key) whose new lines are not a change, see setNewRowsNotChange() */
     protected array $newRowsNotChange = [];
 
+    /** @var array<string, string> child collection => the field that is the primary key of its rows, see setChildKeys() */
+    protected array $childKeys = [];
+    /** @var string[] fields of a child row that never count as a change, see setChildKeys() */
+    protected array $childRowIgnore = ['orden', 'hash'];
+
     protected ?DatabaseMetadata $metadata = null;
     /** @var array<string, array>|null columns of $table, null: not read yet */
     protected ?array $columns = null;
@@ -110,6 +115,20 @@ class Historian {
      */
     public function setNewRowsNotChange(array $collections): void {
         $this->newRowsNotChange = $collections;
+    }
+
+    /**
+     * Optional: child collections stored as a list of rows ('productos' => [[...], [...]]), each row with its own primary key field. When comparing two
+     * records the rows are matched by that key, never by position: a row that moved is not a change, an inserted or deleted row does not shift the others.
+     * Nothing is stored differently, it is only how records are compared when read. $rowIgnore: fields of those rows that do not count (default: orden, hash).
+     * A collection where a row has no key is compared as it comes. An empty list is a collection with no rows: all its rows were deleted.
+     * @param array<string, string> $childKeys collection => primary key field of its rows, ['productos' => 'nota_venta_tienda_producto_id']
+     * @param string[]|null $rowIgnore null: keep the current ones
+     */
+    public function setChildKeys(array $childKeys, ?array $rowIgnore = null): void {
+        $this->childKeys = $childKeys;
+        if($rowIgnore !== null)
+            $this->childRowIgnore = $rowIgnore;
     }
 
     public function setIgnoreDifferenceForFields(array $ignoreDifferenceForFields): void {
@@ -260,6 +279,8 @@ class Historian {
         $previous = [];
         foreach($changedRecords as $historyId => $row) {
             $previous = $row['baseline'] ?? $previous;
+            $keyedPrevious = $this->keyChildRows($previous);
+            $keyedRecord = $this->keyChildRows($row['record']);
             if(empty($onlyFields) || !empty($names)) {
                 foreach($this->differFields($previous, $row['record'], $names) as $field => $diffData) {
                     if(!array_key_exists($field, $fieldChanges))
@@ -271,8 +292,8 @@ class Historian {
             }
             foreach($paths as $path) {
                 $segments = explode('.', $path);
-                $before = $this->valuesAtPath($previous, $segments);
-                $after = $this->valuesAtPath($this->withoutNewRows($previous, $row['record']), $segments);
+                $before = $this->valuesAtPath($keyedPrevious, $segments);
+                $after = $this->valuesAtPath($this->withoutNewRows($keyedPrevious, $keyedRecord), $segments);
                 $kinds = [];
                 foreach(array_unique(array_merge(array_keys($before), array_keys($after))) as $line) {
                     $beforeValue = $before[$line] ?? null;
@@ -710,7 +731,8 @@ class Historian {
      * un-ignored, at any depth.
      */
     protected function differFields(array $before, array $after, array $onlyFields = []): array {
-        $after = $this->withoutNewRows($before, $after);
+        $before = $this->keyChildRows($before);
+        $after = $this->withoutNewRows($before, $this->keyChildRows($after));
         if(empty($onlyFields))
             return $this->differ($before, $after);
         $paths = $this->onlyFieldsPaths($onlyFields);
@@ -719,6 +741,38 @@ class Historian {
           $this->projectPaths($after, $paths),
           array_diff($this->ignoreDifferenceForFields, array_merge(...$paths))
         );
+    }
+
+    /**
+     * The rows of each $childKeys collection keyed by their primary key, without the $childRowIgnore fields: what is compared. A collection that is not a list
+     * of rows, or where a row has no key, stays as it is. Keying twice is harmless.
+     */
+    protected function keyChildRows(array $record): array {
+        foreach($this->childKeys as $collection => $keyField) {
+            if(!is_array($record[$collection] ?? null))
+                continue;
+            $keyed = [];
+            foreach($record[$collection] as $row) {
+                if(!is_array($row) || !isset($row[$keyField]) || !is_scalar($row[$keyField]))
+                    continue 2;
+                $keyed[(string)$row[$keyField]] = array_diff_key($row, array_flip($this->childRowIgnore));
+            }
+            $record[$collection] = $keyed;
+        }
+        return $record;
+    }
+
+    /**
+     * The position of each row of the $childKeys collections of a record: its `orden`, else its place in the list.
+     * @return array<string, array<string, int>> collection => [row key => position]
+     */
+    protected function childOrder(array $record): array {
+        $order = [];
+        foreach($this->childKeys as $collection => $keyField)
+            foreach(array_values(is_array($record[$collection] ?? null) ? $record[$collection] : []) as $i => $row)
+                if(is_array($row) && isset($row[$keyField]) && is_scalar($row[$keyField]))
+                    $order[$collection][(string)$row[$keyField]] = isset($row['orden']) && is_numeric($row['orden']) ? (int)$row['orden'] : $i;
+        return $order;
     }
 
     /**
