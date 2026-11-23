@@ -71,6 +71,9 @@ class Historian {
     /** @var string[] a field with one of these words in its name (snake or camel case) or that ends in id is an identifier: no thousands separators */
     public static array $NoCommasNames = ['numero', 'number', 'num'];
 
+    /** @var string[] child collections (fields that hold lines keyed by the line's key) whose new lines are not a change, see setNewRowsNotChange() */
+    protected array $newRowsNotChange = [];
+
     protected ?DatabaseMetadata $metadata = null;
     /** @var array<string, array>|null columns of $table, null: not read yet */
     protected ?array $columns = null;
@@ -98,6 +101,15 @@ class Historian {
     public function setMetadata(?DatabaseMetadata $metadata): void {
         $this->metadata = $metadata;
         $this->columns = null;
+    }
+
+    /**
+     * Optional: for these child collections ('items') a new line is not a change. A save where nothing else changed is no change (getChangedRecords skips it),
+     * and the new lines are not in the diff. Changed and deleted lines still count. The first record of the history is not compared, everything in it is new.
+     * @param string[] $collections field names, empty: new lines count as any change
+     */
+    public function setNewRowsNotChange(array $collections): void {
+        $this->newRowsNotChange = $collections;
     }
 
     public function setIgnoreDifferenceForFields(array $ignoreDifferenceForFields): void {
@@ -208,8 +220,13 @@ class Historian {
                 throw new \UnexpectedValueException('History record must decode to an array.');
             $row['record'] = $this->normalizeRecordText($record);
 
-            if(!empty($changed) && $row['action'] !== 'delete' && empty($this->differFields($previous, $row['record'], $onlyFields)))
+            if(!empty($changed) && $row['action'] !== 'delete' && empty($this->differFields($previous, $row['record'], $onlyFields))) {
+                if($this->newRowsNotChange !== [])
+                    $previous = $row['record']; // its new lines are known to the next save: editing one is a change
                 continue; // a delete is always kept, even when no field changed
+            }
+            if($this->newRowsNotChange !== [] && !empty($changed))
+                $row['baseline'] = $previous; // the record this row is compared with, the last save may be a skipped one
             $previous = $row['record'];
             $changed[$historyId] = $row;
         }
@@ -225,7 +242,7 @@ class Historian {
      * line or value). A row with several kinds (a new line and a changed one) is listed under each kind.
      * Other entries are plain field names, reported as before.
      *
-     * @param array $changedRecords result of getChangedRecords()
+     * @param array $changedRecords result of getChangedRecords() (the new lines of setNewRowsNotChange() are not a change)
      * @param string[] $onlyFields only report these fields or 'collection.field' paths, empty: all fields
      * @return array<string, array{added: int[], modified: int[], deleted: int[]}> fieldName => history_ids, date sorted
      */
@@ -242,6 +259,7 @@ class Historian {
         $fieldChanges = [];
         $previous = [];
         foreach($changedRecords as $historyId => $row) {
+            $previous = $row['baseline'] ?? $previous;
             if(empty($onlyFields) || !empty($names)) {
                 foreach($this->differFields($previous, $row['record'], $names) as $field => $diffData) {
                     if(!array_key_exists($field, $fieldChanges))
@@ -254,7 +272,7 @@ class Historian {
             foreach($paths as $path) {
                 $segments = explode('.', $path);
                 $before = $this->valuesAtPath($previous, $segments);
-                $after = $this->valuesAtPath($row['record'], $segments);
+                $after = $this->valuesAtPath($this->withoutNewRows($previous, $row['record']), $segments);
                 $kinds = [];
                 foreach(array_unique(array_merge(array_keys($before), array_keys($after))) as $line) {
                     $beforeValue = $before[$line] ?? null;
@@ -692,6 +710,7 @@ class Historian {
      * un-ignored, at any depth.
      */
     protected function differFields(array $before, array $after, array $onlyFields = []): array {
+        $after = $this->withoutNewRows($before, $after);
         if(empty($onlyFields))
             return $this->differ($before, $after);
         $paths = $this->onlyFieldsPaths($onlyFields);
@@ -700,6 +719,24 @@ class Historian {
           $this->projectPaths($after, $paths),
           array_diff($this->ignoreDifferenceForFields, array_merge(...$paths))
         );
+    }
+
+    /**
+     * $after without the lines of the $newRowsNotChange collections that $before does not have: a new line is not a change.
+     * An empty $before is the creation of the record, all of it is new and it stays.
+     */
+    protected function withoutNewRows(array $before, array $after): array {
+        if($before === [])
+            return $after;
+        foreach($this->newRowsNotChange as $collection) {
+            if(!is_array($after[$collection] ?? null))
+                continue;
+            $known = is_array($before[$collection] ?? null) ? $before[$collection] : null;
+            $after[$collection] = array_intersect_key($after[$collection], $known ?? []);
+            if($known === null && $after[$collection] === [])
+                unset($after[$collection]);
+        }
+        return $after;
     }
 
     /** @param string[] $onlyFields 'field' or 'collection.field' entries @return string[][] each entry as list of names */
